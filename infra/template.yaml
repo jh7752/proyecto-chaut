@@ -36,7 +36,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub chaut-${Environment}-api
-      CodeUri: ../
+      CodeUri: ../app/
       Handler: chaut_api.lambda_handler.handler
       Policies:
         - DynamoDBCrudPolicy:
