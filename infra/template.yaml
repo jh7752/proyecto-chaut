@@ -37,7 +37,7 @@ Resources:
     Properties:
       FunctionName: !Sub chaut-${Environment}-api
       CodeUri: ../
-      Handler: chaut_api.lambda_handler.handler
+      Handler: lambda.handler.handler
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref OrdersTable
