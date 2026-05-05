@@ -4,8 +4,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
-ENV CHAUT_BUILD_REV=9f6cf3a
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm && rm -rf /var/lib/apt/lists/*
+ENV CHAUT_BUILD_REV=6826252
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/chromium
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm chromium && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml ./
 COPY src ./src
 COPY vendor ./vendor
