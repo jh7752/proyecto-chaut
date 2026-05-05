@@ -4,10 +4,13 @@ from .coinsenda import CoinsendaClient, create_coinsenda_client
 from .models import (
     CreateOrderRequest,
     CreatePaymentRequestRequest,
+    InspectPaymentRequestRequest,
     EventResponse,
     OrderResponse,
+    PaymentInstructionsResponse,
     build_order,
 )
+from .payment_instructions import extract_payment_instructions
 from .reconciliation import reconcile_payment_status
 from .settings import Settings
 from .store import OrderStore, create_store
@@ -127,6 +130,36 @@ def create_app(
             },
         )
         return updated_order
+
+
+    @app.post(
+        "/orders/{external_id}/payment-instructions",
+        response_model=PaymentInstructionsResponse,
+    )
+    def inspect_payment_instructions(
+        external_id: str,
+        payload: InspectPaymentRequestRequest,
+    ) -> PaymentInstructionsResponse:
+        order = store.get_order(external_id)
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+        if not order.payment_url:
+            raise HTTPException(status_code=409, detail="Order does not have a payment URL")
+
+        inspection = coinsenda_client.inspect_payment_request(order, payload.click_text)
+        instructions = extract_payment_instructions(inspection)
+        store.add_event(
+            order.external_id,
+            "payment_instructions.inspected",
+            {"click_text": payload.click_text, "instructions": instructions, "inspection": inspection},
+        )
+        return PaymentInstructionsResponse(
+            external_id=order.external_id,
+            payment_request_id=order.payment_request_id,
+            payment_url=order.payment_url,
+            instructions=instructions,
+            raw_inspection=inspection,
+        )
 
     @app.get("/orders/{external_id}/events", response_model=list[EventResponse])
     def list_order_events(external_id: str) -> list[EventResponse]:

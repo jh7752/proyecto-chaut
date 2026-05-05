@@ -196,3 +196,18 @@ def test_reconcile_payment_marks_mismatch_as_ambiguous(tmp_path) -> None:
     events = client.get(f"/orders/{order['external_id']}/events").json()
     assert events[-1]["event_type"] == "payment.reconciliation_ambiguous"
     assert events[-1]["payload"]["validation"]["reason"] == "amount mismatch"
+
+
+def test_payment_instructions_inspects_front_and_records_event(tmp_path) -> None:
+    client = make_client(tmp_path)
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
+    client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60})
+
+    response = client.post(f"/orders/{order['external_id']}/payment-instructions", json={"click_text": "DCOP"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["external_id"] == order["external_id"]
+    assert "DCOP" in body["instructions"]["methods"]
+    events = client.get(f"/orders/{order['external_id']}/events").json()
+    assert events[-1]["event_type"] == "payment_instructions.inspected"

@@ -14,6 +14,18 @@ class CreatePaymentRequestRequest(BaseModel):
     expiration_minutes: PositiveInt = Field(default=60, le=1440)
 
 
+class InspectPaymentRequestRequest(BaseModel):
+    click_text: str = Field(default="DCOP")
+
+
+class PaymentInstructionsResponse(BaseModel):
+    external_id: str
+    payment_request_id: str | None
+    payment_url: str | None
+    instructions: dict
+    raw_inspection: dict
+
+
 class OrderResponse(BaseModel):
     external_id: str
     client_id: str

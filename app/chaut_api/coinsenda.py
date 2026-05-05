@@ -27,6 +27,9 @@ class CoinsendaClient:
     def check_payment_request(self, order: OrderResponse) -> PaymentRequestStatus:
         raise NotImplementedError
 
+    def inspect_payment_request(self, order: OrderResponse, click_text: str) -> dict:
+        raise NotImplementedError
+
 
 class CoinsendaNotConfiguredError(RuntimeError):
     pass
@@ -37,6 +40,9 @@ class DisabledCoinsendaClient(CoinsendaClient):
         raise CoinsendaNotConfiguredError("Coinsenda integration is not configured")
 
     def check_payment_request(self, order: OrderResponse) -> PaymentRequestStatus:
+        raise CoinsendaNotConfiguredError("Coinsenda integration is not configured")
+
+    def inspect_payment_request(self, order: OrderResponse, click_text: str) -> dict:
         raise CoinsendaNotConfiguredError("Coinsenda integration is not configured")
 
 
@@ -64,6 +70,16 @@ class MockCoinsendaClient(CoinsendaClient):
             payment_status=order.payment_status,
             raw={"mode": "mock", "external_id": order.external_id},
         )
+
+    def inspect_payment_request(self, order: OrderResponse, click_text: str) -> dict:
+        return {
+            "mode": "mock",
+            "targetUrl": order.payment_url,
+            "clickText": click_text,
+            "before": "DCOP PSE",
+            "after": {"text": "DCOP PSE"},
+            "events": [],
+        }
 
 
 class ScriptCoinsendaClient(CoinsendaClient):
@@ -101,7 +117,17 @@ class ScriptCoinsendaClient(CoinsendaClient):
             raw=record,
         )
 
-    def _run_json(self, script_name: str, *args: str) -> dict:
+
+    def inspect_payment_request(self, order: OrderResponse, click_text: str) -> dict:
+        if not order.payment_url:
+            raise ValueError("Order does not have a payment_url")
+        script_name = "inspect-payment-request-click.js" if click_text else "inspect-payment-request-front.js"
+        args = [order.payment_url]
+        if click_text:
+            args.append(click_text)
+        return self._run_json(script_name, *args, allowed_return_codes=(0,))
+
+    def _run_json(self, script_name: str, *args: str, allowed_return_codes: tuple[int, ...] = (0, 2)) -> dict:
         script = self._runtime_dir / "scripts" / script_name
         proc = subprocess.run(
             ["node", str(script), *args],
@@ -111,7 +137,7 @@ class ScriptCoinsendaClient(CoinsendaClient):
             text=True,
             timeout=60,
         )
-        if proc.returncode not in (0, 2):
+        if proc.returncode not in allowed_return_codes:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "Coinsenda script failed")
         try:
             return json.loads(proc.stdout)

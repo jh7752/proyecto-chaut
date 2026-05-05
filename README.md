@@ -46,6 +46,7 @@ Endpoints principales:
 - `GET /orders/{external_id}/events` - lista eventos auditables de la orden.
 - `POST /orders/{external_id}/payment-request` - crea/asocia PaymentRequest en modo seguro.
 - `POST /orders/{external_id}/reconcile-payment` - concilia contra Coinsenda y confirma/falla/ambigua el pago.
+- `POST /orders/{external_id}/payment-instructions` - inspecciona el front del PaymentRequest y extrae metodos/direcciones visibles.
 
 Estado actual: persistencia local en volumen Docker para MVP/test.
 
@@ -69,3 +70,16 @@ La conciliacion porta la regla probada en el proyecto legacy `coinsenda-docs/Spi
 - Otros estados => pendiente o ambiguo.
 
 Antes de confirmar, Chaut valida que Coinsenda devuelva el mismo `payment_request_id`, `external_id`, monto bruto COP y moneda `cop`. Cualquier diferencia queda como `ambiguous` y no avanza.
+
+## Inspeccion De Instrucciones De Pago
+
+Chaut porta los scripts legacy de Playwright para inspeccionar el front del PaymentRequest COP. El objetivo no es cobrar USDT al usuario, sino detectar instrucciones utiles del flujo COP (metodos como DCOP/PSE y posibles direcciones/QR/datos que el front expone) para guardarlas y mostrarlas de forma simple.
+
+Endpoint:
+
+```bash
+POST /orders/{external_id}/payment-instructions
+{ "click_text": "DCOP" }
+```
+
+El resultado queda auditado con evento `payment_instructions.inspected`.
