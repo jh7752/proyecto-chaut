@@ -8,3 +8,5 @@ __pycache__/
 !.env.example
 .DS_Store
 *.egg-info/
+data/
+*.db

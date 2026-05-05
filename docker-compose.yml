@@ -6,24 +6,11 @@ services:
     environment:
       CHAUT_ENVIRONMENT: dev
       CHAUT_FEE_PERCENT: "0.5"
-      DATABASE_URL: postgresql://chaut:chaut_dev_password@postgres:5432/chaut
-    depends_on:
-      - postgres
+      CHAUT_DATABASE_URL: sqlite:////data/chaut.db
     ports:
       - "80:8000"
-
-  postgres:
-    image: postgres:16-alpine
-    container_name: chaut-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: chaut
-      POSTGRES_USER: chaut
-      POSTGRES_PASSWORD: chaut_dev_password
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5432:5432"
+      - chaut_data:/data
 
 volumes:
-  postgres_data:
+  chaut_data:

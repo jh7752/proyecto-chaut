@@ -7,5 +7,4 @@ class Settings(BaseSettings):
 
     environment: str = Field(default="dev")
     fee_percent: float = Field(default=0.5)
-    orders_table: str | None = Field(default=None)
-    events_table: str | None = Field(default=None)
+    database_url: str = Field(default="sqlite:///./data/chaut.db")
