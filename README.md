@@ -23,3 +23,15 @@ Construir un sistema trazable que permita:
 ## Estado
 
 Bootstrap inicial. Infraestructura y API minima en construccion.
+
+## EC2 MVP
+
+El MVP puede correr en EC2 con Docker Compose:
+
+- API FastAPI en puerto 80
+- Postgres local solo expuesto en localhost
+- Deploy manual/SSM durante bootstrap
+
+```bash
+docker compose up -d --build
+```
