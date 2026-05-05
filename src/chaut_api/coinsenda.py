@@ -121,11 +121,20 @@ class ScriptCoinsendaClient(CoinsendaClient):
     def inspect_payment_request(self, order: OrderResponse, click_text: str) -> dict:
         if not order.payment_url:
             raise ValueError("Order does not have a payment_url")
-        script_name = "inspect-payment-request-click.js" if click_text else "inspect-payment-request-front.js"
-        args = [order.payment_url]
-        if click_text:
-            args.append(click_text)
-        return self._run_json(script_name, *args, allowed_return_codes=(0,))
+        if not click_text:
+            return self._run_json("inspect-payment-request-front.js", order.payment_url, allowed_return_codes=(0,))
+        try:
+            return self._run_json(
+                "inspect-payment-request-click.js",
+                order.payment_url,
+                click_text,
+                allowed_return_codes=(0,),
+            )
+        except RuntimeError as exc:
+            front = self._run_json("inspect-payment-request-front.js", order.payment_url, allowed_return_codes=(0,))
+            front["clickError"] = str(exc)
+            front["clickText"] = click_text
+            return front
 
     def _run_json(self, script_name: str, *args: str, allowed_return_codes: tuple[int, ...] = (0, 2)) -> dict:
         script = self._runtime_dir / "scripts" / script_name
