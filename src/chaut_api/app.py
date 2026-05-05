@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 
-from .models import CreateOrderRequest, OrderResponse, build_order
+from .models import CreateOrderRequest, EventResponse, OrderResponse, build_order
 from .settings import Settings
 from .store import OrderStore, create_store
 
@@ -31,6 +31,13 @@ def create_app(settings: Settings | None = None, store: OrderStore | None = None
         if order is None:
             raise HTTPException(status_code=404, detail="Order not found")
         return order
+
+    @app.get("/orders/{external_id}/events", response_model=list[EventResponse])
+    def list_order_events(external_id: str) -> list[EventResponse]:
+        order = store.get_order(external_id)
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+        return store.list_events(external_id)
 
     return app
 

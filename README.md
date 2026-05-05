@@ -35,3 +35,14 @@ El MVP puede correr en EC2 con Docker Compose:
 ```bash
 docker compose up -d --build
 ```
+
+## API MVP
+
+Endpoints principales:
+
+- `GET /health` - estado del servicio.
+- `POST /orders` - crea orden draft, calcula comision y estimado USDT opcional.
+- `GET /orders/{external_id}` - consulta orden guardada.
+- `GET /orders/{external_id}/events` - lista eventos auditables de la orden.
+
+Estado actual: persistencia local en volumen Docker para MVP/test.

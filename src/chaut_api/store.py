@@ -1,7 +1,9 @@
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 from .models import EventResponse, OrderResponse
 
@@ -11,6 +13,7 @@ class OrderStore(Protocol):
     def put_order(self, order: OrderResponse) -> None: ...
     def get_order(self, external_id: str) -> OrderResponse | None: ...
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse: ...
+    def list_events(self, entity_id: str) -> list[EventResponse]: ...
 
 
 class SqliteOrderStore:
@@ -34,9 +37,14 @@ class SqliteOrderStore:
                     fee_percent REAL NOT NULL,
                     fee_cop REAL NOT NULL,
                     amount_cop_net REAL NOT NULL,
+                    estimated_rate_cop_per_usdt REAL,
+                    estimated_usdt REAL,
+                    payment_request_id TEXT,
+                    payment_url TEXT,
                     payment_status TEXT NOT NULL,
                     conversion_status TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS events (
@@ -51,6 +59,21 @@ class SqliteOrderStore:
                     ON events(entity_id, created_at);
                 """
             )
+            self._ensure_order_columns(conn)
+
+    def _ensure_order_columns(self, conn: sqlite3.Connection) -> None:
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
+        migrations = {
+            "estimated_rate_cop_per_usdt": "ALTER TABLE orders ADD COLUMN estimated_rate_cop_per_usdt REAL",
+            "estimated_usdt": "ALTER TABLE orders ADD COLUMN estimated_usdt REAL",
+            "payment_request_id": "ALTER TABLE orders ADD COLUMN payment_request_id TEXT",
+            "payment_url": "ALTER TABLE orders ADD COLUMN payment_url TEXT",
+            "updated_at": "ALTER TABLE orders ADD COLUMN updated_at TEXT",
+        }
+        for column, statement in migrations.items():
+            if column not in existing:
+                conn.execute(statement)
+        conn.execute("UPDATE orders SET updated_at = created_at WHERE updated_at IS NULL")
 
     def put_order(self, order: OrderResponse) -> None:
         with self._connect() as conn:
@@ -58,8 +81,10 @@ class SqliteOrderStore:
                 """
                 INSERT INTO orders (
                     external_id, client_id, amount_cop_gross, fee_percent, fee_cop,
-                    amount_cop_net, payment_status, conversion_status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    amount_cop_net, estimated_rate_cop_per_usdt, estimated_usdt,
+                    payment_request_id, payment_url, payment_status, conversion_status,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order.external_id,
@@ -68,9 +93,14 @@ class SqliteOrderStore:
                     order.fee_percent,
                     order.fee_cop,
                     order.amount_cop_net,
+                    order.estimated_rate_cop_per_usdt,
+                    order.estimated_usdt,
+                    order.payment_request_id,
+                    order.payment_url,
                     order.payment_status,
                     order.conversion_status,
                     order.created_at,
+                    order.updated_at,
                 ),
             )
 
@@ -82,9 +112,6 @@ class SqliteOrderStore:
         return OrderResponse(**dict(row))
 
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse:
-        from datetime import UTC, datetime
-        from uuid import uuid4
-
         event = EventResponse(
             event_id=f"evt-{uuid4().hex[:12]}",
             entity_id=entity_id,
@@ -107,6 +134,28 @@ class SqliteOrderStore:
                 ),
             )
         return event
+
+    def list_events(self, entity_id: str) -> list[EventResponse]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, entity_id, event_type, payload_json, created_at
+                FROM events
+                WHERE entity_id = ?
+                ORDER BY created_at ASC
+                """,
+                (entity_id,),
+            ).fetchall()
+        return [
+            EventResponse(
+                event_id=row["event_id"],
+                entity_id=row["entity_id"],
+                event_type=row["event_type"],
+                payload=json.loads(row["payload_json"]),
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
 
 def create_store(database_url: str | None) -> OrderStore:

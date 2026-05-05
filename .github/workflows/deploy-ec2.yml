@@ -1,0 +1,41 @@
+name: Deploy EC2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'app/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'pyproject.toml'
+      - '.github/workflows/deploy-ec2.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Deploy through SSM
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids i-09127c011f918a30e \
+            --document-name AWS-RunShellScript \
+            --comment "Deploy Proyecto Chaut EC2" \
+            --parameters 'commands=["set -euxo pipefail","cd /opt/chaut/proyecto-chaut","git fetch origin main","git reset --hard origin/main","docker compose up -d --build --remove-orphans","docker ps"]' \
+            --query 'Command.CommandId' \
+            --output text)
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id i-09127c011f918a30e
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id i-09127c011f918a30e \
+            --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}'
