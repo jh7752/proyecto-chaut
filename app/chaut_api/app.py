@@ -8,6 +8,7 @@ from .models import (
     OrderResponse,
     build_order,
 )
+from .reconciliation import reconcile_payment_status
 from .settings import Settings
 from .store import OrderStore, create_store
 
@@ -98,6 +99,32 @@ def create_app(
             order.external_id,
             payment_status.payment_status,
             {"coinsenda": payment_status.raw},
+        )
+        return updated_order
+
+
+    @app.post("/orders/{external_id}/reconcile-payment", response_model=OrderResponse)
+    def reconcile_payment(external_id: str) -> OrderResponse:
+        order = store.get_order(external_id)
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+        if not order.payment_request_id:
+            raise HTTPException(status_code=409, detail="Order does not have a payment request")
+
+        coinsenda_status = coinsenda_client.check_payment_request(order)
+        reconciliation = reconcile_payment_status(order, coinsenda_status.raw)
+        updated_order = store.update_payment_status(order.external_id, reconciliation.payment_status)
+        if updated_order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        store.add_event(
+            order.external_id,
+            reconciliation.event_type,
+            {
+                "payment_status": reconciliation.payment_status,
+                "validation": reconciliation.validation,
+                "coinsenda": coinsenda_status.raw,
+            },
         )
         return updated_order
 

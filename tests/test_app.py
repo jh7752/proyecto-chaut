@@ -111,3 +111,88 @@ def test_check_payment_request_records_status_event(tmp_path) -> None:
         "payment_request.created",
         created["payment_status"],
     ]
+
+
+class AcceptedCoinsendaClient:
+    def __init__(self, payment_request_id: str | None = None) -> None:
+        self.payment_request_id = payment_request_id
+
+    def create_payment_request(self, order, expiration_minutes: int):
+        from chaut_api.coinsenda import PaymentRequestResult
+
+        payment_request_id = self.payment_request_id or f"pr-{order.external_id}"
+        return PaymentRequestResult(
+            payment_request_id=payment_request_id,
+            payment_url=f"https://app.coinsenda.com/paymentRequest?paymentRequestId={payment_request_id}",
+            status="pending",
+            raw={"payment_request_id": payment_request_id},
+        )
+
+    def check_payment_request(self, order):
+        from chaut_api.coinsenda import PaymentRequestStatus
+
+        return PaymentRequestStatus(
+            payment_status="payment_confirmed",
+            raw={
+                "event_type": "payment_confirmed",
+                "payment_request": {
+                    "id": order.payment_request_id,
+                    "state": "accepted",
+                    "external_id": order.external_id,
+                    "amount": order.amount_cop_gross,
+                    "currency": "cop",
+                },
+            },
+        )
+
+
+class MismatchedCoinsendaClient(AcceptedCoinsendaClient):
+    def check_payment_request(self, order):
+        from chaut_api.coinsenda import PaymentRequestStatus
+
+        return PaymentRequestStatus(
+            payment_status="payment_confirmed",
+            raw={
+                "event_type": "payment_confirmed",
+                "payment_request": {
+                    "id": order.payment_request_id,
+                    "state": "accepted",
+                    "external_id": order.external_id,
+                    "amount": order.amount_cop_gross + 1,
+                    "currency": "cop",
+                },
+            },
+        )
+
+
+def make_client_with_coinsenda(tmp_path, coinsenda_client):
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'test.db'}")
+    return TestClient(create_app(settings=settings, coinsenda_client=coinsenda_client))
+
+
+def test_reconcile_payment_confirms_accepted_matching_payment_request(tmp_path) -> None:
+    client = make_client_with_coinsenda(tmp_path, AcceptedCoinsendaClient())
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
+    client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60})
+
+    response = client.post(f"/orders/{order['external_id']}/reconcile-payment")
+
+    assert response.status_code == 200
+    assert response.json()["payment_status"] == "confirmed"
+    events = client.get(f"/orders/{order['external_id']}/events").json()
+    assert events[-1]["event_type"] == "payment.confirmed"
+    assert events[-1]["payload"]["validation"]["ok"] is True
+
+
+def test_reconcile_payment_marks_mismatch_as_ambiguous(tmp_path) -> None:
+    client = make_client_with_coinsenda(tmp_path, MismatchedCoinsendaClient())
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
+    client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60})
+
+    response = client.post(f"/orders/{order['external_id']}/reconcile-payment")
+
+    assert response.status_code == 200
+    assert response.json()["payment_status"] == "ambiguous"
+    events = client.get(f"/orders/{order['external_id']}/events").json()
+    assert events[-1]["event_type"] == "payment.reconciliation_ambiguous"
+    assert events[-1]["payload"]["validation"]["reason"] == "amount mismatch"

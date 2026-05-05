@@ -45,6 +45,7 @@ Endpoints principales:
 - `GET /orders/{external_id}` - consulta orden guardada.
 - `GET /orders/{external_id}/events` - lista eventos auditables de la orden.
 - `POST /orders/{external_id}/payment-request` - crea/asocia PaymentRequest en modo seguro.
+- `POST /orders/{external_id}/reconcile-payment` - concilia contra Coinsenda y confirma/falla/ambigua el pago.
 
 Estado actual: persistencia local en volumen Docker para MVP/test.
 
@@ -58,3 +59,13 @@ Antes de activar modo real faltan secrets y prueba controlada contra Coinsenda:
 - llave privada/pubkey registrada
 - verificacion de respuesta real de PaymentRequest
 - confirmacion humana antes de crear cobros reales
+
+## Reconciliacion De Pagos
+
+La conciliacion porta la regla probada en el proyecto legacy `coinsenda-docs/SpicyMeet`:
+
+- `accepted`, `paid`, `confirmed`, `completed`, `success`, `approved` => pago confirmado.
+- `expired`, `cancelled`, `canceled`, `failed`, `rejected` => pago terminal no pagado.
+- Otros estados => pendiente o ambiguo.
+
+Antes de confirmar, Chaut valida que Coinsenda devuelva el mismo `payment_request_id`, `external_id`, monto bruto COP y moneda `cop`. Cualquier diferencia queda como `ambiguous` y no avanza.
