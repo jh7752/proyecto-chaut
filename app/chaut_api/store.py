@@ -12,6 +12,9 @@ class OrderStore(Protocol):
     def init_schema(self) -> None: ...
     def put_order(self, order: OrderResponse) -> None: ...
     def get_order(self, external_id: str) -> OrderResponse | None: ...
+    def update_payment_request(
+        self, external_id: str, payment_request_id: str, payment_url: str, payment_status: str
+    ) -> OrderResponse | None: ...
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse: ...
     def list_events(self, entity_id: str) -> list[EventResponse]: ...
 
@@ -110,6 +113,22 @@ class SqliteOrderStore:
         if row is None:
             return None
         return OrderResponse(**dict(row))
+
+
+    def update_payment_request(
+        self, external_id: str, payment_request_id: str, payment_url: str, payment_status: str
+    ) -> OrderResponse | None:
+        updated_at = datetime.now(UTC).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE orders
+                SET payment_request_id = ?, payment_url = ?, payment_status = ?, updated_at = ?
+                WHERE external_id = ?
+                """,
+                (payment_request_id, payment_url, payment_status, updated_at, external_id),
+            )
+        return self.get_order(external_id)
 
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse:
         event = EventResponse(

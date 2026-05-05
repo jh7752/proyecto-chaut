@@ -44,5 +44,17 @@ Endpoints principales:
 - `POST /orders` - crea orden draft, calcula comision y estimado USDT opcional.
 - `GET /orders/{external_id}` - consulta orden guardada.
 - `GET /orders/{external_id}/events` - lista eventos auditables de la orden.
+- `POST /orders/{external_id}/payment-request` - crea/asocia PaymentRequest en modo seguro.
 
 Estado actual: persistencia local en volumen Docker para MVP/test.
+
+## Coinsenda Modo Seguro
+
+La integracion inicia en `CHAUT_COINSENDA_MODE=mock`. Este modo no llama a Coinsenda real ni mueve fondos; solo genera un PaymentRequest simulado para validar flujo, persistencia y auditoria.
+
+Antes de activar modo real faltan secrets y prueba controlada contra Coinsenda:
+
+- email de Coinsenda autorizado
+- llave privada/pubkey registrada
+- verificacion de respuesta real de PaymentRequest
+- confirmacion humana antes de crear cobros reales

@@ -10,6 +10,10 @@ class CreateOrderRequest(BaseModel):
     estimated_rate_cop_per_usdt: PositiveFloat | None = None
 
 
+class CreatePaymentRequestRequest(BaseModel):
+    expiration_minutes: PositiveInt = Field(default=60, le=1440)
+
+
 class OrderResponse(BaseModel):
     external_id: str
     client_id: str

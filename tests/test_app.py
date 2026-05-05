@@ -67,3 +67,30 @@ def test_get_order_returns_404_for_missing_order(tmp_path) -> None:
     client = make_client(tmp_path)
     response = client.get("/orders/chaut-missing")
     assert response.status_code == 404
+
+
+def test_create_payment_request_updates_order_and_adds_event(tmp_path) -> None:
+    client = make_client(tmp_path)
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
+
+    response = client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60})
+
+    assert response.status_code == 200
+    updated = response.json()
+    assert updated["payment_request_id"] == f"mock-pr-{order['external_id']}"
+    assert updated["payment_url"].endswith(f"/paymentRequest/mock-pr-{order['external_id']}")
+    assert updated["payment_status"] == "created"
+
+    events = client.get(f"/orders/{order['external_id']}/events").json()
+    assert [event["event_type"] for event in events] == ["order.created", "payment_request.created"]
+    assert events[1]["payload"]["payment_request_id"] == updated["payment_request_id"]
+
+
+def test_create_payment_request_is_idempotent_guarded(tmp_path) -> None:
+    client = make_client(tmp_path)
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
+    first = client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60})
+    second = client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60})
+
+    assert first.status_code == 200
+    assert second.status_code == 409
