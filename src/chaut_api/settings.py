@@ -10,3 +10,4 @@ class Settings(BaseSettings):
     database_url: str = Field(default="sqlite:///./data/chaut.db")
     coinsenda_mode: str = Field(default="mock")
     coinsenda_app_origin: str = Field(default="https://app.coinsenda.com")
+    coinsenda_runtime_dir: str = Field(default="./vendor/coinsenda")

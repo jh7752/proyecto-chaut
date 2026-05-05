@@ -94,3 +94,20 @@ def test_create_payment_request_is_idempotent_guarded(tmp_path) -> None:
 
     assert first.status_code == 200
     assert second.status_code == 409
+
+
+def test_check_payment_request_records_status_event(tmp_path) -> None:
+    client = make_client(tmp_path)
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
+    created = client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60}).json()
+
+    response = client.post(f"/orders/{order['external_id']}/payment-request/check")
+
+    assert response.status_code == 200
+    assert response.json()["payment_status"] == created["payment_status"]
+    events = client.get(f"/orders/{order['external_id']}/events").json()
+    assert [event["event_type"] for event in events] == [
+        "order.created",
+        "payment_request.created",
+        created["payment_status"],
+    ]

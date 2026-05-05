@@ -10,3 +10,6 @@ __pycache__/
 *.egg-info/
 data/
 *.db
+vendor/coinsenda/.env
+vendor/coinsenda/keys/
+vendor/coinsenda/data/

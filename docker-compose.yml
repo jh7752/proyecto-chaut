@@ -7,6 +7,8 @@ services:
       CHAUT_ENVIRONMENT: dev
       CHAUT_FEE_PERCENT: "0.5"
       CHAUT_DATABASE_URL: sqlite:////data/chaut.db
+      CHAUT_COINSENDA_MODE: script
+      CHAUT_COINSENDA_RUNTIME_DIR: /app/vendor/coinsenda
     ports:
       - "80:8000"
     volumes:

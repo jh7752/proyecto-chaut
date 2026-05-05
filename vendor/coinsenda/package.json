@@ -1,0 +1,26 @@
+{
+  "name": "spicymeet",
+  "version": "1.0.0",
+  "description": "//SpicyMeet - Coinsenda - Examples",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "generate:keypair": "node scripts/generate-keypair.js",
+    "auth:jwt": "node scripts/auth-jwt-from-private-key.js",
+    "cobro": "node scripts/cobro.js",
+    "payment-request:create": "node scripts/create-payment-request.js",
+    "payment-request:check": "node scripts/check-payment-request.js",
+    "order:create": "node scripts/create-order.js",
+    "order:payment-request": "node scripts/create-order-payment-request.js",
+    "order:check": "node scripts/check-order-payment.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@coinsenda/sdk": "^1.2.0",
+    "dotenv": "^16.4.5",
+    "jsonwebtoken": "^9.0.0",
+    "node-rsa": "^1.1.1"
+  }
+}

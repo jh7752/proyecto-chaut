@@ -22,6 +22,7 @@ def create_app(
     coinsenda_client = coinsenda_client or create_coinsenda_client(
         settings.coinsenda_mode,
         settings.coinsenda_app_origin,
+        settings.coinsenda_runtime_dir,
     )
     app = FastAPI(title="Proyecto Chaut API", version="0.1.0")
 
@@ -77,6 +78,26 @@ def create_app(
                 "payment_status": payment_request.status,
                 "coinsenda": payment_request.raw,
             },
+        )
+        return updated_order
+
+
+    @app.post("/orders/{external_id}/payment-request/check", response_model=OrderResponse)
+    def check_payment_request(external_id: str) -> OrderResponse:
+        order = store.get_order(external_id)
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+        if not order.payment_request_id:
+            raise HTTPException(status_code=409, detail="Order does not have a payment request")
+
+        payment_status = coinsenda_client.check_payment_request(order)
+        updated_order = store.update_payment_status(order.external_id, payment_status.payment_status)
+        if updated_order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+        store.add_event(
+            order.external_id,
+            payment_status.payment_status,
+            {"coinsenda": payment_status.raw},
         )
         return updated_order
 
