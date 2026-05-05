@@ -29,7 +29,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1
       - name: Build
-        run: sam build --template-file infra/template.yaml --use-container
+        run: sam build --template-file infra/template.yaml
       - name: Deploy
         run: |
           sam deploy \
