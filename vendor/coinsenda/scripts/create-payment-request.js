@@ -96,7 +96,7 @@ async function main() {
   if (!jwt) throw new Error('El script de auth no devolvio JWT.');
 
   const userId = userIdFromJwt(jwt);
-  const client = new CoinsendaClientV2(process.env.COINSENDA_ENV || 'prod');
+  const client = new CoinsendaClientV2({ environment: process.env.COINSENDA_ENV || 'prod' });
   client.setJwt(jwt);
   client.setClientId('');
   client.setUserId(userId);

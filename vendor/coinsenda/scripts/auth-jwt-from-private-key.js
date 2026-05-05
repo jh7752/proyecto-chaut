@@ -21,7 +21,7 @@ async function main() {
     throw new Error('Completá COINSENDA_EMAIL en .env con tu email real de Coinsenda.');
   }
 
-  let client = new CoinsendaClientV2(process.env.COINSENDA_ENV || 'prod');
+  let client = new CoinsendaClientV2({ environment: process.env.COINSENDA_ENV || 'prod' });
   client.setClientId('');
 
   let jwt_payload = {
