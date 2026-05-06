@@ -4,8 +4,48 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, PositiveFloat, PositiveInt
 
 
+class AccountIdentityRequest(BaseModel):
+    provider: str = Field(default="telegram", min_length=1)
+    provider_user_id: str = Field(min_length=1)
+    chat_id: str | None = None
+    username: str | None = None
+    display_name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone_number: str | None = None
+    email: str | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class AccountIdentityResponse(BaseModel):
+    provider: str
+    provider_user_id: str
+    chat_id: str | None = None
+    username: str | None = None
+    display_name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone_number: str | None = None
+    email: str | None = None
+    metadata: dict = Field(default_factory=dict)
+    created_at: str
+    updated_at: str
+
+
+class AccountResponse(BaseModel):
+    customer_id: str
+    status: str
+    display_name: str | None = None
+    phone_number: str | None = None
+    email: str | None = None
+    created_at: str
+    updated_at: str
+    identities: list[AccountIdentityResponse] = Field(default_factory=list)
+
+
 class CheckoutRequest(BaseModel):
     client_id: str = Field(min_length=1)
+    identity: AccountIdentityRequest | None = None
     amount_cop: PositiveInt
     expiration_minutes: PositiveInt = Field(default=60, le=1440)
     method: str = Field(default="Bre-B")
@@ -15,6 +55,7 @@ class CheckoutRequest(BaseModel):
 
 class CheckoutResponse(BaseModel):
     external_id: str
+    customer_id: str | None = None
     status: str
     checkout_status: str
     amount_cop: int
@@ -35,6 +76,7 @@ class CheckoutResponse(BaseModel):
 
 class CreateOrderRequest(BaseModel):
     client_id: str = Field(min_length=1)
+    customer_id: str | None = None
     amount_cop_gross: PositiveInt
     estimated_rate_cop_per_usdt: PositiveFloat | None = None
 
@@ -60,6 +102,7 @@ class PaymentInstructionsResponse(BaseModel):
 class OrderResponse(BaseModel):
     external_id: str
     client_id: str
+    customer_id: str | None = None
     amount_cop_gross: int
     fee_percent: float
     fee_asset: str = "xaut"
@@ -97,6 +140,7 @@ def build_order(payload: CreateOrderRequest, fee_percent: float) -> OrderRespons
     return OrderResponse(
         external_id=f"chaut-{uuid4().hex[:12]}",
         client_id=payload.client_id,
+        customer_id=payload.customer_id,
         amount_cop_gross=payload.amount_cop_gross,
         fee_percent=fee_percent,
         fee_asset="xaut",

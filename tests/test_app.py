@@ -315,3 +315,75 @@ def test_checkout_retries_when_price_slippage_exceeds_tolerance(monkeypatch, tmp
     first_external_id = body["instructions"]["checkout_attempts"][0]["external_id"]
     first_events = client.get(f"/orders/{first_external_id}/events").json()
     assert first_events[-1]["event_type"] == "checkout.price_mismatch"
+
+
+def test_account_identify_creates_and_updates_customer(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/accounts/identify",
+        json={
+            "provider": "telegram",
+            "provider_user_id": "271173673",
+            "chat_id": "271173673",
+            "username": "johan",
+            "display_name": "Johan",
+        },
+    )
+
+    assert response.status_code == 200
+    account = response.json()
+    assert account["customer_id"].startswith("cus-")
+    assert account["status"] == "active"
+    assert account["display_name"] == "Johan"
+    assert account["identities"][0]["provider"] == "telegram"
+    assert account["identities"][0]["provider_user_id"] == "271173673"
+
+    second = client.post(
+        "/accounts/identify",
+        json={
+            "provider": "telegram",
+            "provider_user_id": "271173673",
+            "chat_id": "271173673",
+            "username": "johan_updated",
+            "display_name": "Johan D",
+        },
+    ).json()
+
+    assert second["customer_id"] == account["customer_id"]
+    assert second["display_name"] == "Johan D"
+    assert second["identities"][0]["username"] == "johan_updated"
+
+    lookup = client.get("/accounts/by-identity/telegram/271173673")
+    assert lookup.status_code == 200
+    assert lookup.json()["customer_id"] == account["customer_id"]
+
+
+def test_checkout_with_identity_links_order_to_account(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    monkeypatch.setattr(app_module, "get_usdt_cop_sell_price", lambda: 3527.5)
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/checkout",
+        json={
+            "client_id": "telegram:271173673",
+            "identity": {
+                "provider": "telegram",
+                "provider_user_id": "271173673",
+                "chat_id": "271173673",
+                "display_name": "Johan",
+            },
+            "amount_cop": 5000,
+            "expiration_minutes": 60,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["customer_id"].startswith("cus-")
+    order = client.get(f"/orders/{body['external_id']}").json()
+    assert order["customer_id"] == body["customer_id"]
+    account = client.get(f"/accounts/{body['customer_id']}").json()
+    assert account["identities"][0]["provider_user_id"] == "271173673"

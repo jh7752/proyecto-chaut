@@ -7,6 +7,8 @@ from .coinsenda import (
     get_usdt_cop_sell_price,
 )
 from .models import (
+    AccountIdentityRequest,
+    AccountResponse,
     CheckoutRequest,
     CheckoutResponse,
     CreateOrderRequest,
@@ -46,8 +48,41 @@ def create_app(
         }
 
 
+    @app.post("/accounts/identify", response_model=AccountResponse)
+    def identify_account(payload: AccountIdentityRequest) -> AccountResponse:
+        account = store.upsert_account_identity(payload)
+        store.add_event(
+            account.customer_id,
+            "account.identity_upserted",
+            {
+                "provider": payload.provider,
+                "provider_user_id": payload.provider_user_id,
+                "chat_id": payload.chat_id,
+                "username": payload.username,
+                "display_name": payload.display_name,
+                "has_phone_number": bool(payload.phone_number),
+                "has_email": bool(payload.email),
+            },
+        )
+        return account
+
+    @app.get("/accounts/{customer_id}", response_model=AccountResponse)
+    def get_account(customer_id: str) -> AccountResponse:
+        account = store.get_account(customer_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        return account
+
+    @app.get("/accounts/by-identity/{provider}/{provider_user_id}", response_model=AccountResponse)
+    def get_account_by_identity(provider: str, provider_user_id: str) -> AccountResponse:
+        account = store.get_account_by_identity(provider, provider_user_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        return account
+
     @app.post("/checkout", response_model=CheckoutResponse)
     def checkout(payload: CheckoutRequest) -> CheckoutResponse:
+        account = store.upsert_account_identity(payload.identity) if payload.identity else None
         attempts = []
         last_result: dict | None = None
         max_attempts = payload.max_retries + 1
@@ -56,6 +91,7 @@ def create_app(
             sell_price = getattr(coinsenda_client, "get_usdt_cop_sell_price", get_usdt_cop_sell_price)()
             order_payload = CreateOrderRequest(
                 client_id=payload.client_id,
+                customer_id=account.customer_id if account else None,
                 amount_cop_gross=payload.amount_cop,
                 estimated_rate_cop_per_usdt=sell_price,
             )
@@ -117,6 +153,7 @@ def create_app(
             attempt = {
                 "attempt": attempt_number,
                 "external_id": updated_order.external_id,
+                "customer_id": updated_order.customer_id,
                 "payment_request_id": updated_order.payment_request_id,
                 "sell_price_cop_per_usdt": sell_price,
                 "payment_amount": updated_order.payment_amount,
@@ -167,6 +204,7 @@ def create_app(
         primary_address = (instructions.get("addresses") or [{}])[0].get("address")
         return CheckoutResponse(
             external_id=updated_order.external_id,
+            customer_id=updated_order.customer_id,
             status=updated_order.payment_status,
             checkout_status=attempt["checkout_status"],
             amount_cop=updated_order.amount_cop_gross,

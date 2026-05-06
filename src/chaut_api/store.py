@@ -5,11 +5,14 @@ from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
 
-from .models import EventResponse, OrderResponse
+from .models import AccountIdentityRequest, AccountIdentityResponse, AccountResponse, EventResponse, OrderResponse
 
 
 class OrderStore(Protocol):
     def init_schema(self) -> None: ...
+    def upsert_account_identity(self, identity: AccountIdentityRequest) -> AccountResponse: ...
+    def get_account(self, customer_id: str) -> AccountResponse | None: ...
+    def get_account_by_identity(self, provider: str, provider_user_id: str) -> AccountResponse | None: ...
     def put_order(self, order: OrderResponse) -> None: ...
     def get_order(self, external_id: str) -> OrderResponse | None: ...
     def update_payment_request(
@@ -44,6 +47,7 @@ class SqliteOrderStore:
                 CREATE TABLE IF NOT EXISTS orders (
                     external_id TEXT PRIMARY KEY,
                     client_id TEXT NOT NULL,
+                    customer_id TEXT,
                     amount_cop_gross INTEGER NOT NULL,
                     fee_percent REAL NOT NULL,
                     fee_asset TEXT NOT NULL DEFAULT 'xaut',
@@ -62,6 +66,37 @@ class SqliteOrderStore:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS accounts (
+                    customer_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    display_name TEXT,
+                    phone_number TEXT,
+                    email TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS account_identities (
+                    provider TEXT NOT NULL,
+                    provider_user_id TEXT NOT NULL,
+                    customer_id TEXT NOT NULL,
+                    chat_id TEXT,
+                    username TEXT,
+                    display_name TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    phone_number TEXT,
+                    email TEXT,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (provider, provider_user_id),
+                    FOREIGN KEY (customer_id) REFERENCES accounts(customer_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_account_identities_customer_id
+                    ON account_identities(customer_id);
+
                 CREATE TABLE IF NOT EXISTS events (
                     event_id TEXT PRIMARY KEY,
                     entity_id TEXT NOT NULL,
@@ -79,6 +114,7 @@ class SqliteOrderStore:
     def _ensure_order_columns(self, conn: sqlite3.Connection) -> None:
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
         migrations = {
+            "customer_id": "ALTER TABLE orders ADD COLUMN customer_id TEXT",
             "fee_asset": "ALTER TABLE orders ADD COLUMN fee_asset TEXT NOT NULL DEFAULT 'xaut'",
             "payment_currency": "ALTER TABLE orders ADD COLUMN payment_currency TEXT NOT NULL DEFAULT 'cop'",
             "payment_amount": "ALTER TABLE orders ADD COLUMN payment_amount REAL",
@@ -94,20 +130,132 @@ class SqliteOrderStore:
                 conn.execute(statement)
         conn.execute("UPDATE orders SET updated_at = created_at WHERE updated_at IS NULL")
 
+    def upsert_account_identity(self, identity: AccountIdentityRequest) -> AccountResponse:
+        now = datetime.now(UTC).isoformat()
+        with self._connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT customer_id FROM account_identities
+                WHERE provider = ? AND provider_user_id = ?
+                """,
+                (identity.provider, identity.provider_user_id),
+            ).fetchone()
+            customer_id = existing["customer_id"] if existing else f"cus-{uuid4().hex[:12]}"
+            if existing is None:
+                conn.execute(
+                    """
+                    INSERT INTO accounts (customer_id, status, display_name, phone_number, email, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (customer_id, "active", identity.display_name, identity.phone_number, identity.email, now, now),
+                )
+                created_at = now
+            else:
+                conn.execute(
+                    """
+                    UPDATE accounts
+                    SET display_name = COALESCE(?, display_name),
+                        phone_number = COALESCE(?, phone_number),
+                        email = COALESCE(?, email),
+                        updated_at = ?
+                    WHERE customer_id = ?
+                    """,
+                    (identity.display_name, identity.phone_number, identity.email, now, customer_id),
+                )
+                row = conn.execute(
+                    """
+                    SELECT created_at FROM account_identities
+                    WHERE provider = ? AND provider_user_id = ?
+                    """,
+                    (identity.provider, identity.provider_user_id),
+                ).fetchone()
+                created_at = row["created_at"] if row else now
+
+            conn.execute(
+                """
+                INSERT INTO account_identities (
+                    provider, provider_user_id, customer_id, chat_id, username, display_name,
+                    first_name, last_name, phone_number, email, metadata_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(provider, provider_user_id) DO UPDATE SET
+                    chat_id = excluded.chat_id,
+                    username = excluded.username,
+                    display_name = excluded.display_name,
+                    first_name = excluded.first_name,
+                    last_name = excluded.last_name,
+                    phone_number = excluded.phone_number,
+                    email = excluded.email,
+                    metadata_json = excluded.metadata_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    identity.provider,
+                    identity.provider_user_id,
+                    customer_id,
+                    identity.chat_id,
+                    identity.username,
+                    identity.display_name,
+                    identity.first_name,
+                    identity.last_name,
+                    identity.phone_number,
+                    identity.email,
+                    json.dumps(identity.metadata),
+                    created_at,
+                    now,
+                ),
+            )
+        account = self.get_account(customer_id)
+        if account is None:
+            raise RuntimeError("Account upsert failed")
+        return account
+
+    def get_account(self, customer_id: str) -> AccountResponse | None:
+        with self._connect() as conn:
+            account_row = conn.execute("SELECT * FROM accounts WHERE customer_id = ?", (customer_id,)).fetchone()
+            if account_row is None:
+                return None
+            identity_rows = conn.execute(
+                """
+                SELECT provider, provider_user_id, chat_id, username, display_name, first_name, last_name,
+                       phone_number, email, metadata_json, created_at, updated_at
+                FROM account_identities
+                WHERE customer_id = ?
+                ORDER BY created_at ASC
+                """,
+                (customer_id,),
+            ).fetchall()
+        account = dict(account_row)
+        account["identities"] = [_identity_from_row(row) for row in identity_rows]
+        return AccountResponse(**account)
+
+    def get_account_by_identity(self, provider: str, provider_user_id: str) -> AccountResponse | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT customer_id FROM account_identities
+                WHERE provider = ? AND provider_user_id = ?
+                """,
+                (provider, provider_user_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return self.get_account(row["customer_id"])
+
     def put_order(self, order: OrderResponse) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO orders (
-                    external_id, client_id, amount_cop_gross, fee_percent, fee_asset, fee_cop,
+                    external_id, client_id, customer_id, amount_cop_gross, fee_percent, fee_asset, fee_cop,
                     amount_cop_net, payment_currency, payment_amount, sell_price_cop_per_usdt,
                     estimated_rate_cop_per_usdt, estimated_usdt, payment_request_id, payment_url,
                     payment_status, conversion_status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order.external_id,
                     order.client_id,
+                    order.customer_id,
                     order.amount_cop_gross,
                     order.fee_percent,
                     order.fee_asset,
@@ -233,6 +381,12 @@ def create_store(database_url: str | None) -> OrderStore:
     store = SqliteOrderStore(database_url or "sqlite:///./data/chaut.db")
     store.init_schema()
     return store
+
+
+def _identity_from_row(row: sqlite3.Row) -> AccountIdentityResponse:
+    data = dict(row)
+    data["metadata"] = json.loads(data.pop("metadata_json") or "{}")
+    return AccountIdentityResponse(**data)
 
 
 def _sqlite_path(database_url: str) -> Path:

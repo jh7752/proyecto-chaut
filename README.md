@@ -40,7 +40,10 @@ docker compose up -d --build
 
 Endpoints principales:
 
-- `POST /checkout` - crea orden, consulta sell price, crea PaymentRequest USDT e inspecciona Bre-B en una sola llamada.
+- `POST /checkout` - identifica cuenta opcionalmente, crea orden, consulta sell price, crea PaymentRequest USDT e inspecciona Bre-B en una sola llamada.
+- `POST /accounts/identify` - crea o actualiza una cuenta por identidad externa como Telegram o WhatsApp.
+- `GET /accounts/{customer_id}` - consulta cuenta interna y sus identidades asociadas.
+- `GET /accounts/by-identity/{provider}/{provider_user_id}` - resuelve una identidad externa a cuenta interna.
 - `GET /health` - estado del servicio.
 - `POST /orders` - crea orden draft, calcula comision y estimado USDT opcional.
 - `GET /orders/{external_id}` - consulta orden guardada.
@@ -52,6 +55,35 @@ Endpoints principales:
 Estado actual: persistencia local en volumen Docker para MVP/test.
 
 La comisión ya no se descuenta en COP. El usuario paga el COP digitado; la comisión se aplicará después sobre XAUT cuando exista el módulo de compra.
+
+## Account Service MVP
+
+Chaut identifica usuarios con una cuenta interna estable (`customer_id`) y una o mas identidades externas. Para Telegram, el bot debe enviar el `telegram_user_id` como `provider_user_id`; el telefono solo se guarda si el usuario lo comparte explicitamente.
+
+```json
+{
+  "provider": "telegram",
+  "provider_user_id": "271173673",
+  "chat_id": "271173673",
+  "username": "johan",
+  "display_name": "Johan"
+}
+```
+
+Endpoint:
+
+```text
+POST /accounts/identify
+```
+
+La respuesta incluye:
+
+```text
+customer_id = cus-...
+identities[] = telegram:271173673
+```
+
+`POST /checkout` tambien acepta `identity`; si viene, crea/actualiza la cuenta y guarda `customer_id` en la orden. Asi el mismo backend puede soportar Telegram, WhatsApp, mini-app y admin sin perder trazabilidad por usuario.
 
 ## Coinsenda Modo Seguro
 
@@ -105,7 +137,13 @@ Prueba de referencia: con `sell_price=3527.5`, `5000 COP / 3527.5 = 1.417434 USD
 
 ```json
 {
-  "client_id": "telegram-271173673",
+  "client_id": "telegram:271173673",
+  "identity": {
+    "provider": "telegram",
+    "provider_user_id": "271173673",
+    "chat_id": "271173673",
+    "display_name": "Johan"
+  },
   "amount_cop": 5000,
   "method": "Bre-B",
   "expiration_minutes": 60,
