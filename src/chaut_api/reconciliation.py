@@ -68,11 +68,16 @@ def validate_payment_request_match(order: OrderResponse, payment_request: dict |
             "actual": actual_external_id,
         }
 
+    expected_currency = str(order.payment_currency or "cop").lower()
+    expected_amount_source = order.payment_amount if expected_currency == "usdt" else order.amount_cop_gross
+    if expected_amount_source is None:
+        return {"ok": False, "reason": "order payment_amount is missing", "expected_currency": expected_currency}
+
     try:
-        expected_amount = Decimal(str(order.amount_cop_gross))
+        expected_amount = Decimal(str(expected_amount_source))
         actual_amount = Decimal(str(payment_request.get("amount")))
     except (InvalidOperation, TypeError):
-        return {"ok": False, "reason": "amount is not numeric", "expected": order.amount_cop_gross}
+        return {"ok": False, "reason": "amount is not numeric", "expected": str(expected_amount_source)}
     if actual_amount != expected_amount:
         return {
             "ok": False,
@@ -82,7 +87,17 @@ def validate_payment_request_match(order: OrderResponse, payment_request: dict |
         }
 
     currency = str(payment_request.get("currency") or "").lower()
-    if currency != "cop":
-        return {"ok": False, "reason": "currency is not cop", "expected": "cop", "actual": currency}
+    if currency != expected_currency:
+        return {
+            "ok": False,
+            "reason": "currency mismatch",
+            "expected": expected_currency,
+            "actual": currency,
+        }
 
-    return {"ok": True, "reason": "payment_request matches order"}
+    return {
+        "ok": True,
+        "reason": "payment_request matches order",
+        "confirmed_currency": expected_currency,
+        "confirmed_amount": str(expected_amount),
+    }

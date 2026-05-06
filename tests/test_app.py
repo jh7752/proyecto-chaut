@@ -387,3 +387,44 @@ def test_checkout_with_identity_links_order_to_account(monkeypatch, tmp_path) ->
     assert order["customer_id"] == body["customer_id"]
     account = client.get(f"/accounts/{body['customer_id']}").json()
     assert account["identities"][0]["provider_user_id"] == "271173673"
+
+
+def test_reconcile_payment_confirms_accepted_matching_usdt_payment_request(tmp_path) -> None:
+    class AcceptedUsdtCoinsendaClient(AcceptedCoinsendaClient):
+        def check_payment_request(self, order):
+            from chaut_api.coinsenda import PaymentRequestStatus
+
+            return PaymentRequestStatus(
+                payment_status="payment_confirmed",
+                raw={
+                    "event_type": "payment_confirmed",
+                    "payment_request": {
+                        "id": order.payment_request_id,
+                        "state": "accepted",
+                        "external_id": order.external_id,
+                        "amount": str(order.payment_amount),
+                        "currency": "usdt",
+                    },
+                },
+            )
+
+    client = make_client_with_coinsenda(tmp_path, AcceptedUsdtCoinsendaClient())
+    # Recreate equivalent persisted state in this client's isolated store.
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 5000}).json()
+    client.post(
+        f"/orders/{order['external_id']}/payment-request",
+        json={
+            "expiration_minutes": 60,
+            "currency": "usdt",
+            "sell_price_cop_per_usdt": 3527.49,
+        },
+    )
+
+    response = client.post(f"/orders/{order['external_id']}/reconcile-payment")
+
+    assert response.status_code == 200
+    assert response.json()["payment_status"] == "confirmed"
+    events = client.get(f"/orders/{order['external_id']}/events").json()
+    assert events[-1]["event_type"] == "payment.confirmed"
+    assert events[-1]["payload"]["validation"]["confirmed_currency"] == "usdt"
+    assert events[-1]["payload"]["validation"]["confirmed_amount"] == str(response.json()["payment_amount"])
