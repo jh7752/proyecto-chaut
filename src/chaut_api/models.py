@@ -9,13 +9,19 @@ class CheckoutRequest(BaseModel):
     amount_cop: PositiveInt
     expiration_minutes: PositiveInt = Field(default=60, le=1440)
     method: str = Field(default="Bre-B")
+    max_price_slippage_cop: PositiveFloat = 1.0
+    max_retries: int = Field(default=1, ge=0, le=3)
 
 
 class CheckoutResponse(BaseModel):
     external_id: str
     status: str
+    checkout_status: str
     amount_cop: int
     pay_amount_cop: str | None
+    pay_amount_cop_numeric: float | None
+    price_slippage_cop: float | None
+    attempts: int
     pay_to: str | None
     method: str
     payment_currency: str

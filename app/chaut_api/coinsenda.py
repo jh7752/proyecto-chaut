@@ -80,12 +80,13 @@ class MockCoinsendaClient(CoinsendaClient):
         )
 
     def inspect_payment_request(self, order: OrderResponse, click_text: str) -> dict:
+        amount_cop = order.amount_cop_gross
         return {
             "mode": "mock",
             "targetUrl": order.payment_url,
             "clickText": click_text,
             "before": "DCOP PSE",
-            "after": {"text": "DCOP PSE"},
+            "after": {"text": f"DCOP PSE Envia {amount_cop:,} COP a @coinsendaMock123"},
             "events": [],
         }
 
@@ -146,6 +147,12 @@ class ScriptCoinsendaClient(CoinsendaClient):
             front["clickText"] = click_text
             return front
 
+    def get_usdt_cop_pair(self) -> dict:
+        return self._run_json("get-usdt-cop-pair.js", allowed_return_codes=(0,))
+
+    def get_usdt_cop_sell_price(self) -> float:
+        return float(self.get_usdt_cop_pair()["sell_price"])
+
     def _run_json(self, script_name: str, *args: str, allowed_return_codes: tuple[int, ...] = (0, 2)) -> dict:
         script = self._runtime_dir / "scripts" / script_name
         proc = subprocess.run(
@@ -187,6 +194,19 @@ def _format_amount(payment_amount: float, currency: str) -> str:
 
 
 def get_usdt_cop_pair() -> dict:
+    script = Path(__file__).resolve().parents[2] / "vendor" / "coinsenda" / "scripts" / "get-usdt-cop-pair.js"
+    if script.exists():
+        proc = subprocess.run(
+            ["node", str(script)],
+            cwd=script.parents[1],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if proc.returncode == 0:
+            return json.loads(proc.stdout)
+
     req = urllib.request.Request(
         "https://swap.coinsenda.com/api/pairs/get-all-pairs-for-public",
         headers={

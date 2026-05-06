@@ -51,3 +51,23 @@ def extract_payment_instructions(inspection: dict[str, Any]) -> dict[str, Any]:
             "has_front_text": bool(full_text.strip()),
         },
     }
+
+
+def parse_cop_amount(value: str | None) -> float | None:
+    if value is None:
+        return None
+    normalized = value.strip().replace(" ", "")
+    if not normalized:
+        return None
+    if "," in normalized and "." in normalized:
+        normalized = normalized.replace(",", "")
+    elif "," in normalized:
+        parts = normalized.split(",")
+        if len(parts[-1]) == 2:
+            normalized = "".join(parts[:-1]) + "." + parts[-1]
+        else:
+            normalized = "".join(parts)
+    try:
+        return float(normalized)
+    except ValueError:
+        return None

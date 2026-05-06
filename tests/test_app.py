@@ -255,6 +255,10 @@ def test_checkout_orchestrates_order_payment_request_and_instructions(monkeypatc
     assert body["sell_price_cop_per_usdt"] == 3527.5
     assert body["method"] == "Bre-B"
     assert body["payment_request_id"] == f"mock-pr-{body['external_id']}"
+    assert body["checkout_status"] == "ready"
+    assert body["pay_amount_cop_numeric"] == 5000
+    assert body["price_slippage_cop"] == 0
+    assert body["attempts"] == 1
     assert "DCOP" in body["instructions"]["methods"]
 
     events = client.get(f"/orders/{body['external_id']}/events").json()
@@ -263,3 +267,51 @@ def test_checkout_orchestrates_order_payment_request_and_instructions(monkeypatc
         "payment_request.created",
         "payment_instructions.inspected",
     ]
+
+
+class SlippageCoinsendaClient(AcceptedCoinsendaClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.inspections = 0
+
+    def inspect_payment_request(self, order, click_text: str):
+        self.inspections += 1
+        amount = "4,964.73" if self.inspections == 1 else "5,000"
+        return {
+            "mode": "mock",
+            "targetUrl": order.payment_url,
+            "clickText": click_text,
+            "after": {"text": f"Envia {amount} COP a @coinsendaRetry123"},
+            "events": [],
+        }
+
+
+def test_checkout_retries_when_price_slippage_exceeds_tolerance(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    prices = iter([3550.61, 3535.69])
+    monkeypatch.setattr(app_module, "get_usdt_cop_sell_price", lambda: next(prices))
+    client = make_client_with_coinsenda(tmp_path, SlippageCoinsendaClient())
+
+    response = client.post(
+        "/checkout",
+        json={
+            "client_id": "cli-test",
+            "amount_cop": 5000,
+            "expiration_minutes": 60,
+            "max_price_slippage_cop": 1,
+            "max_retries": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checkout_status"] == "ready"
+    assert body["attempts"] == 2
+    assert body["pay_amount_cop_numeric"] == 5000
+    assert body["instructions"]["checkout_attempts"][0]["checkout_status"] == "price_mismatch"
+    assert body["instructions"]["checkout_attempts"][1]["checkout_status"] == "ready"
+
+    first_external_id = body["instructions"]["checkout_attempts"][0]["external_id"]
+    first_events = client.get(f"/orders/{first_external_id}/events").json()
+    assert first_events[-1]["event_type"] == "checkout.price_mismatch"

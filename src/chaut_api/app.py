@@ -17,7 +17,7 @@ from .models import (
     PaymentInstructionsResponse,
     build_order,
 )
-from .payment_instructions import extract_payment_instructions
+from .payment_instructions import extract_payment_instructions, parse_cop_amount
 from .reconciliation import reconcile_payment_status
 from .settings import Settings
 from .store import OrderStore, create_store
@@ -48,70 +48,140 @@ def create_app(
 
     @app.post("/checkout", response_model=CheckoutResponse)
     def checkout(payload: CheckoutRequest) -> CheckoutResponse:
-        sell_price = get_usdt_cop_sell_price()
-        order_payload = CreateOrderRequest(
-            client_id=payload.client_id,
-            amount_cop_gross=payload.amount_cop,
-            estimated_rate_cop_per_usdt=sell_price,
-        )
-        order = build_order(order_payload, settings.fee_percent)
-        store.put_order(order)
-        store.add_event(order.external_id, "order.created", order.model_dump())
+        attempts = []
+        last_result: dict | None = None
+        max_attempts = payload.max_retries + 1
 
-        payment_amount = calculate_usdt_from_cop(order.amount_cop_gross, sell_price)
-        payment_request = coinsenda_client.create_payment_request(
-            order,
-            payload.expiration_minutes,
-            "usdt",
-            payment_amount,
-        )
-        updated_order = store.update_payment_request(
-            external_id=order.external_id,
-            payment_request_id=payment_request.payment_request_id,
-            payment_url=payment_request.payment_url,
-            payment_status=payment_request.status,
-            payment_currency="usdt",
-            payment_amount=payment_amount,
-            sell_price_cop_per_usdt=sell_price,
-        )
-        if updated_order is None:
-            raise HTTPException(status_code=404, detail="Order not found")
-        store.add_event(
-            updated_order.external_id,
-            "payment_request.created",
-            {
-                "payment_request_id": payment_request.payment_request_id,
-                "payment_url": payment_request.payment_url,
-                "payment_status": payment_request.status,
-                "payment_currency": "usdt",
-                "payment_amount": payment_amount,
+        for attempt_number in range(1, max_attempts + 1):
+            sell_price = getattr(coinsenda_client, "get_usdt_cop_sell_price", get_usdt_cop_sell_price)()
+            order_payload = CreateOrderRequest(
+                client_id=payload.client_id,
+                amount_cop_gross=payload.amount_cop,
+                estimated_rate_cop_per_usdt=sell_price,
+            )
+            order = build_order(order_payload, settings.fee_percent)
+            store.put_order(order)
+            store.add_event(
+                order.external_id,
+                "order.created",
+                {**order.model_dump(), "checkout_attempt": attempt_number},
+            )
+
+            payment_amount = calculate_usdt_from_cop(order.amount_cop_gross, sell_price)
+            payment_request = coinsenda_client.create_payment_request(
+                order,
+                payload.expiration_minutes,
+                "usdt",
+                payment_amount,
+            )
+            updated_order = store.update_payment_request(
+                external_id=order.external_id,
+                payment_request_id=payment_request.payment_request_id,
+                payment_url=payment_request.payment_url,
+                payment_status=payment_request.status,
+                payment_currency="usdt",
+                payment_amount=payment_amount,
+                sell_price_cop_per_usdt=sell_price,
+            )
+            if updated_order is None:
+                raise HTTPException(status_code=404, detail="Order not found")
+            store.add_event(
+                updated_order.external_id,
+                "payment_request.created",
+                {
+                    "checkout_attempt": attempt_number,
+                    "payment_request_id": payment_request.payment_request_id,
+                    "payment_url": payment_request.payment_url,
+                    "payment_status": payment_request.status,
+                    "payment_currency": "usdt",
+                    "payment_amount": payment_amount,
+                    "sell_price_cop_per_usdt": sell_price,
+                    "fee_asset": updated_order.fee_asset,
+                    "coinsenda": payment_request.raw,
+                },
+            )
+
+            inspection = coinsenda_client.inspect_payment_request(updated_order, payload.method)
+            instructions = extract_payment_instructions(inspection)
+            pay_amount_cop = parse_cop_amount(instructions.get("amount_cop_text"))
+            price_slippage_cop = None
+            checkout_status = "price_unverified"
+            if pay_amount_cop is not None:
+                price_slippage_cop = round(pay_amount_cop - float(payload.amount_cop), 2)
+                checkout_status = (
+                    "ready"
+                    if abs(price_slippage_cop) <= payload.max_price_slippage_cop
+                    else "price_mismatch"
+                )
+
+            attempt = {
+                "attempt": attempt_number,
+                "external_id": updated_order.external_id,
+                "payment_request_id": updated_order.payment_request_id,
                 "sell_price_cop_per_usdt": sell_price,
-                "fee_asset": updated_order.fee_asset,
-                "coinsenda": payment_request.raw,
-            },
-        )
+                "payment_amount": updated_order.payment_amount,
+                "pay_amount_cop": instructions.get("amount_cop_text"),
+                "pay_amount_cop_numeric": pay_amount_cop,
+                "price_slippage_cop": price_slippage_cop,
+                "checkout_status": checkout_status,
+            }
+            attempts.append(attempt)
+            store.add_event(
+                updated_order.external_id,
+                "payment_instructions.inspected",
+                {
+                    "checkout_attempt": attempt_number,
+                    "click_text": payload.method,
+                    "instructions": instructions,
+                    "inspection": inspection,
+                    "price_validation": attempt,
+                },
+            )
+            last_result = {
+                "order": updated_order,
+                "instructions": instructions,
+                "sell_price": sell_price,
+                "attempt": attempt,
+            }
+            if checkout_status == "ready":
+                break
 
-        inspection = coinsenda_client.inspect_payment_request(updated_order, payload.method)
-        instructions = extract_payment_instructions(inspection)
-        store.add_event(
-            updated_order.external_id,
-            "payment_instructions.inspected",
-            {"click_text": payload.method, "instructions": instructions, "inspection": inspection},
-        )
+            store.add_event(
+                updated_order.external_id,
+                "checkout.price_mismatch",
+                {
+                    "checkout_attempt": attempt_number,
+                    "target_amount_cop": payload.amount_cop,
+                    "max_price_slippage_cop": payload.max_price_slippage_cop,
+                    "attempt": attempt,
+                    "will_retry": attempt_number < max_attempts,
+                },
+            )
+
+        if last_result is None:
+            raise HTTPException(status_code=500, detail="Checkout failed before creating an order")
+
+        updated_order = last_result["order"]
+        instructions = last_result["instructions"]
+        attempt = last_result["attempt"]
         primary_address = (instructions.get("addresses") or [{}])[0].get("address")
         return CheckoutResponse(
             external_id=updated_order.external_id,
             status=updated_order.payment_status,
+            checkout_status=attempt["checkout_status"],
             amount_cop=updated_order.amount_cop_gross,
             pay_amount_cop=instructions.get("amount_cop_text"),
+            pay_amount_cop_numeric=attempt["pay_amount_cop_numeric"],
+            price_slippage_cop=attempt["price_slippage_cop"],
+            attempts=len(attempts),
             pay_to=primary_address,
             method=payload.method,
             payment_currency=updated_order.payment_currency,
             payment_amount=updated_order.payment_amount,
-            sell_price_cop_per_usdt=sell_price,
+            sell_price_cop_per_usdt=attempt["sell_price_cop_per_usdt"],
             payment_request_id=updated_order.payment_request_id,
             payment_url=updated_order.payment_url,
-            instructions=instructions,
+            instructions={**instructions, "price_validation": attempt, "checkout_attempts": attempts},
             expires_in_minutes=payload.expiration_minutes,
         )
 
