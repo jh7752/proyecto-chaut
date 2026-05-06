@@ -1,6 +1,5 @@
 import json
 import subprocess
-import urllib.request
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
