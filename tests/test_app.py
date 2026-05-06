@@ -428,3 +428,44 @@ def test_reconcile_payment_confirms_accepted_matching_usdt_payment_request(tmp_p
     assert events[-1]["event_type"] == "payment.confirmed"
     assert events[-1]["payload"]["validation"]["confirmed_currency"] == "usdt"
     assert events[-1]["payload"]["validation"]["confirmed_amount"] == str(response.json()["payment_amount"])
+
+
+def test_bybit_public_endpoints(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class StubBybitClient:
+        def health(self):
+            return {"status": "ok", "source": "bybit", "symbol": "XAUTUSDT"}
+
+        def get_xaut_ticker(self):
+            return {
+                "category": "spot",
+                "symbol": "XAUTUSDT",
+                "lastPrice": "3300.12",
+                "bid1Price": "3299.10",
+                "ask1Price": "3301.20",
+                "raw": {"retCode": 0},
+            }
+
+        def get_xaut_instrument(self):
+            return {
+                "category": "spot",
+                "symbol": "XAUTUSDT",
+                "baseCoin": "XAUT",
+                "quoteCoin": "USDT",
+                "status": "Trading",
+                "lotSizeFilter": {"minOrderQty": "0.00001"},
+                "priceFilter": {"tickSize": "0.01"},
+                "raw": {"retCode": 0},
+            }
+
+    monkeypatch.setattr(app_module, "BybitClient", StubBybitClient)
+    client = make_client(tmp_path)
+
+    assert client.get("/bybit/health").json() == {
+        "status": "ok",
+        "source": "bybit",
+        "symbol": "XAUTUSDT",
+    }
+    assert client.get("/bybit/xaut-ticker").json()["lastPrice"] == "3300.12"
+    assert client.get("/bybit/xaut-instrument").json()["baseCoin"] == "XAUT"

@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException
 
+from .bybit import BybitClient
+
 from .coinsenda import (
     CoinsendaClient,
     calculate_usdt_from_cop,
@@ -9,6 +11,9 @@ from .coinsenda import (
 from .models import (
     AccountIdentityRequest,
     AccountResponse,
+    BybitHealthResponse,
+    BybitInstrumentResponse,
+    BybitTickerResponse,
     CheckoutRequest,
     CheckoutResponse,
     CreateOrderRequest,
@@ -79,6 +84,18 @@ def create_app(
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
         return account
+
+    @app.get("/bybit/health", response_model=BybitHealthResponse)
+    def bybit_health() -> BybitHealthResponse:
+        return BybitHealthResponse(**BybitClient().health())
+
+    @app.get("/bybit/xaut-ticker", response_model=BybitTickerResponse)
+    def bybit_xaut_ticker() -> BybitTickerResponse:
+        return BybitTickerResponse(**BybitClient().get_xaut_ticker())
+
+    @app.get("/bybit/xaut-instrument", response_model=BybitInstrumentResponse)
+    def bybit_xaut_instrument() -> BybitInstrumentResponse:
+        return BybitInstrumentResponse(**BybitClient().get_xaut_instrument())
 
     @app.post("/checkout", response_model=CheckoutResponse)
     def checkout(payload: CheckoutRequest) -> CheckoutResponse:

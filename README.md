@@ -45,6 +45,9 @@ Endpoints principales:
 - `GET /accounts/{customer_id}` - consulta cuenta interna y sus identidades asociadas.
 - `GET /accounts/by-identity/{provider}/{provider_user_id}` - resuelve una identidad externa a cuenta interna.
 - `GET /health` - estado del servicio.
+- `GET /bybit/health` - prueba conexion publica Bybit para XAUTUSDT.
+- `GET /bybit/xaut-ticker` - precio publico spot XAUTUSDT.
+- `GET /bybit/xaut-instrument` - filtros/precision publica del instrumento spot XAUTUSDT.
 - `POST /orders` - crea orden draft, calcula comision y estimado USDT opcional.
 - `GET /orders/{external_id}` - consulta orden guardada.
 - `GET /orders/{external_id}/events` - lista eventos auditables de la orden.
@@ -55,6 +58,20 @@ Endpoints principales:
 Estado actual: persistencia local en volumen Docker para MVP/test.
 
 La comisión ya no se descuenta en COP. El usuario paga el COP digitado; la comisión se aplicará después sobre XAUT cuando exista el módulo de compra.
+
+## Bybit Public API
+
+Primer paso seguro de integracion Bybit: solo endpoints publicos, sin API keys y sin mover fondos.
+
+```text
+GET /bybit/health
+GET /bybit/xaut-ticker
+GET /bybit/xaut-instrument
+```
+
+Usan Bybit V5 public market API para `category=spot&symbol=XAUTUSDT`. Estos endpoints sirven para validar disponibilidad de XAUTUSDT, precio publico y filtros del instrumento antes de conectar llaves privadas o ejecutar compras.
+
+La liquidacion final en gramos de oro digital debe esperar conexion privada/operativa con Bybit y ejecucion real o quote operativo confirmado.
 
 ## Account Service MVP
 
