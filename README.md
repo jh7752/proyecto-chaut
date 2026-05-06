@@ -50,6 +50,8 @@ Endpoints principales:
 
 Estado actual: persistencia local en volumen Docker para MVP/test.
 
+La comisión ya no se descuenta en COP. El usuario paga el COP digitado; la comisión se aplicará después sobre XAUT cuando exista el módulo de compra.
+
 ## Coinsenda Modo Seguro
 
 La integracion inicia en `CHAUT_COINSENDA_MODE=mock`. Este modo no llama a Coinsenda real ni mueve fondos; solo genera un PaymentRequest simulado para validar flujo, persistencia y auditoria.
@@ -83,3 +85,15 @@ POST /orders/{external_id}/payment-instructions
 ```
 
 El resultado queda auditado con evento `payment_instructions.inspected`.
+
+## PaymentRequest USDT Valorado En COP
+
+Para que el usuario digite COP y pague por Bre-B, Chaut usa el flujo probado con Coinsenda:
+
+1. Consultar el par `USDT/COP` en Coinsenda.
+2. Usar `sell_price`, no `buy_price`.
+3. Calcular `payment_amount = amount_cop_gross / sell_price`, redondeado a 6 decimales.
+4. Crear PaymentRequest con `currency=usdt`.
+5. Inspeccionar/crear provider Bre-B y validar que el COP devuelto por Coinsenda coincida con el COP digitado.
+
+Prueba de referencia: con `sell_price=3527.5`, `5000 COP / 3527.5 = 1.417434 USDT`, y Bre-B pidió `4,999.98 COP`.

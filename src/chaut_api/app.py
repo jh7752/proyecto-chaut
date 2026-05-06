@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 
-from .coinsenda import CoinsendaClient, create_coinsenda_client
+from .coinsenda import CoinsendaClient, calculate_usdt_from_cop, create_coinsenda_client
 from .models import (
     CreateOrderRequest,
     CreatePaymentRequestRequest,
@@ -63,12 +63,30 @@ def create_app(
         if order.payment_request_id:
             raise HTTPException(status_code=409, detail="Payment request already exists")
 
-        payment_request = coinsenda_client.create_payment_request(order, payload.expiration_minutes)
+        payment_amount = float(order.amount_cop_gross)
+        sell_price = payload.sell_price_cop_per_usdt
+        if payload.currency == "usdt":
+            if sell_price is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="sell_price_cop_per_usdt is required for USDT payment requests",
+                )
+            payment_amount = calculate_usdt_from_cop(order.amount_cop_gross, sell_price)
+
+        payment_request = coinsenda_client.create_payment_request(
+            order,
+            payload.expiration_minutes,
+            payload.currency,
+            payment_amount,
+        )
         updated_order = store.update_payment_request(
             external_id=order.external_id,
             payment_request_id=payment_request.payment_request_id,
             payment_url=payment_request.payment_url,
             payment_status=payment_request.status,
+            payment_currency=payload.currency,
+            payment_amount=payment_amount,
+            sell_price_cop_per_usdt=sell_price,
         )
         if updated_order is None:
             raise HTTPException(status_code=404, detail="Order not found")
@@ -80,6 +98,10 @@ def create_app(
                 "payment_request_id": payment_request.payment_request_id,
                 "payment_url": payment_request.payment_url,
                 "payment_status": payment_request.status,
+                "payment_currency": payload.currency,
+                "payment_amount": payment_amount,
+                "sell_price_cop_per_usdt": sell_price,
+                "fee_asset": updated_order.fee_asset,
                 "coinsenda": payment_request.raw,
             },
         )

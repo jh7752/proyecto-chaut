@@ -1,6 +1,7 @@
 import json
 import subprocess
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 from .models import OrderResponse
@@ -21,7 +22,9 @@ class PaymentRequestStatus:
 
 
 class CoinsendaClient:
-    def create_payment_request(self, order: OrderResponse, expiration_minutes: int) -> PaymentRequestResult:
+    def create_payment_request(
+        self, order: OrderResponse, expiration_minutes: int, currency: str, payment_amount: float
+    ) -> PaymentRequestResult:
         raise NotImplementedError
 
     def check_payment_request(self, order: OrderResponse) -> PaymentRequestStatus:
@@ -36,7 +39,9 @@ class CoinsendaNotConfiguredError(RuntimeError):
 
 
 class DisabledCoinsendaClient(CoinsendaClient):
-    def create_payment_request(self, order: OrderResponse, expiration_minutes: int) -> PaymentRequestResult:
+    def create_payment_request(
+        self, order: OrderResponse, expiration_minutes: int, currency: str, payment_amount: float
+    ) -> PaymentRequestResult:
         raise CoinsendaNotConfiguredError("Coinsenda integration is not configured")
 
     def check_payment_request(self, order: OrderResponse) -> PaymentRequestStatus:
@@ -50,7 +55,9 @@ class MockCoinsendaClient(CoinsendaClient):
     def __init__(self, app_origin: str = "https://app.coinsenda.com") -> None:
         self._app_origin = app_origin.rstrip("/")
 
-    def create_payment_request(self, order: OrderResponse, expiration_minutes: int) -> PaymentRequestResult:
+    def create_payment_request(
+        self, order: OrderResponse, expiration_minutes: int, currency: str, payment_amount: float
+    ) -> PaymentRequestResult:
         payment_request_id = f"mock-pr-{order.external_id}"
         return PaymentRequestResult(
             payment_request_id=payment_request_id,
@@ -59,8 +66,8 @@ class MockCoinsendaClient(CoinsendaClient):
             raw={
                 "mode": "mock",
                 "external_id": order.external_id,
-                "amount": str(order.amount_cop_gross),
-                "currency": "cop",
+                "amount": str(payment_amount),
+                "currency": currency,
                 "expiration_minutes": expiration_minutes,
             },
         )
@@ -86,13 +93,15 @@ class ScriptCoinsendaClient(CoinsendaClient):
     def __init__(self, runtime_dir: str) -> None:
         self._runtime_dir = Path(runtime_dir)
 
-    def create_payment_request(self, order: OrderResponse, expiration_minutes: int) -> PaymentRequestResult:
+    def create_payment_request(
+        self, order: OrderResponse, expiration_minutes: int, currency: str, payment_amount: float
+    ) -> PaymentRequestResult:
         record = self._run_json(
             "create-payment-request.js",
             "--amount",
-            str(order.amount_cop_gross),
+            _format_amount(payment_amount, currency),
             "--currency",
-            "cop",
+            currency,
             "--external-id",
             order.external_id,
             "--expiration",
@@ -160,3 +169,17 @@ def create_coinsenda_client(mode: str, app_origin: str, runtime_dir: str) -> Coi
     if mode == "script":
         return ScriptCoinsendaClient(runtime_dir=runtime_dir)
     return DisabledCoinsendaClient()
+
+
+def calculate_usdt_from_cop(target_cop: int | float, sell_price_cop_per_usdt: float) -> float:
+    value = (Decimal(str(target_cop)) / Decimal(str(sell_price_cop_per_usdt))).quantize(
+        Decimal("0.000001"),
+        rounding=ROUND_HALF_UP,
+    )
+    return float(value)
+
+
+def _format_amount(payment_amount: float, currency: str) -> str:
+    if currency == "usdt":
+        return f"{payment_amount:.6f}"
+    return str(int(payment_amount)) if float(payment_amount).is_integer() else str(payment_amount)

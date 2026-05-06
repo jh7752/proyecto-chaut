@@ -22,8 +22,8 @@ def test_create_order_calculates_fee_and_persists(tmp_path) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["fee_percent"] == 0.5
-    assert body["fee_cop"] == 500
-    assert body["amount_cop_net"] == 99500
+    assert body["fee_cop"] == 0
+    assert body["amount_cop_net"] == 100000
     assert body["payment_status"] == "draft"
     assert body["conversion_status"] == "not_started"
     assert body["payment_request_id"] is None
@@ -45,8 +45,8 @@ def test_create_order_calculates_usdt_estimate(tmp_path) -> None:
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["amount_cop_net"] == 99500
-    assert body["estimated_usdt"] == 24.875
+    assert body["amount_cop_net"] == 100000
+    assert body["estimated_usdt"] == 25
 
 
 def test_order_events_include_order_created(tmp_path) -> None:
@@ -117,15 +117,16 @@ class AcceptedCoinsendaClient:
     def __init__(self, payment_request_id: str | None = None) -> None:
         self.payment_request_id = payment_request_id
 
-    def create_payment_request(self, order, expiration_minutes: int):
+    def create_payment_request(self, order, expiration_minutes: int, currency: str = "cop", payment_amount: float | None = None):
         from chaut_api.coinsenda import PaymentRequestResult
 
         payment_request_id = self.payment_request_id or f"pr-{order.external_id}"
+        payment_amount = payment_amount or order.amount_cop_gross
         return PaymentRequestResult(
             payment_request_id=payment_request_id,
             payment_url=f"https://app.coinsenda.com/paymentRequest?paymentRequestId={payment_request_id}",
             status="pending",
-            raw={"payment_request_id": payment_request_id},
+            raw={"payment_request_id": payment_request_id, "currency": currency, "amount": payment_amount},
         )
 
     def check_payment_request(self, order):
@@ -211,3 +212,25 @@ def test_payment_instructions_inspects_front_and_records_event(tmp_path) -> None
     assert "DCOP" in body["instructions"]["methods"]
     events = client.get(f"/orders/{order['external_id']}/events").json()
     assert events[-1]["event_type"] == "payment_instructions.inspected"
+
+
+def test_create_usdt_payment_request_uses_sell_price(tmp_path) -> None:
+    client = make_client(tmp_path)
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 5000}).json()
+
+    response = client.post(
+        f"/orders/{order['external_id']}/payment-request",
+        json={
+            "expiration_minutes": 60,
+            "currency": "usdt",
+            "sell_price_cop_per_usdt": 3527.5,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["payment_currency"] == "usdt"
+    assert body["payment_amount"] == 1.417434
+    assert body["sell_price_cop_per_usdt"] == 3527.5
+    assert body["fee_asset"] == "xaut"
+    assert body["fee_cop"] == 0

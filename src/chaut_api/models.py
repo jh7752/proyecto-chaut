@@ -12,6 +12,8 @@ class CreateOrderRequest(BaseModel):
 
 class CreatePaymentRequestRequest(BaseModel):
     expiration_minutes: PositiveInt = Field(default=60, le=1440)
+    currency: str = Field(default="cop", pattern="^(cop|usdt)$")
+    sell_price_cop_per_usdt: PositiveFloat | None = None
 
 
 class InspectPaymentRequestRequest(BaseModel):
@@ -31,8 +33,12 @@ class OrderResponse(BaseModel):
     client_id: str
     amount_cop_gross: int
     fee_percent: float
-    fee_cop: float
+    fee_asset: str = "xaut"
+    fee_cop: float = 0.0
     amount_cop_net: float
+    payment_currency: str = "cop"
+    payment_amount: float | None = None
+    sell_price_cop_per_usdt: float | None = None
     estimated_rate_cop_per_usdt: float | None = None
     estimated_usdt: float | None = None
     payment_request_id: str | None = None
@@ -53,8 +59,8 @@ class EventResponse(BaseModel):
 
 def build_order(payload: CreateOrderRequest, fee_percent: float) -> OrderResponse:
     now = datetime.now(UTC).isoformat()
-    fee_cop = round(payload.amount_cop_gross * fee_percent / 100, 2)
-    amount_cop_net = round(payload.amount_cop_gross - fee_cop, 2)
+    fee_cop = 0.0
+    amount_cop_net = float(payload.amount_cop_gross)
     estimated_usdt = None
     if payload.estimated_rate_cop_per_usdt:
         estimated_usdt = round(amount_cop_net / payload.estimated_rate_cop_per_usdt, 8)
@@ -64,6 +70,7 @@ def build_order(payload: CreateOrderRequest, fee_percent: float) -> OrderRespons
         client_id=payload.client_id,
         amount_cop_gross=payload.amount_cop_gross,
         fee_percent=fee_percent,
+        fee_asset="xaut",
         fee_cop=fee_cop,
         amount_cop_net=amount_cop_net,
         estimated_rate_cop_per_usdt=payload.estimated_rate_cop_per_usdt,
