@@ -187,17 +187,28 @@ def _format_amount(payment_amount: float, currency: str) -> str:
 
 
 def get_usdt_cop_pair() -> dict:
-    req = urllib.request.Request(
-        "https://swap.coinsenda.com/api/pairs/get-all-pairs-for-public",
-        headers={
-            "Accept": "application/json",
-            "Origin": "https://app.coinsenda.com",
-            "Referer": "https://app.coinsenda.com/",
-            "User-Agent": "Mozilla/5.0",
-        },
+    script = """
+const { CoinsendaClientV2 } = require('@coinsenda/sdk');
+(async () => {
+  const client = new CoinsendaClientV2({ environment: process.env.COINSENDA_ENV || 'prod' });
+  const response = await client.listPairs();
+  console.log(JSON.stringify(response));
+})().catch((error) => {
+  console.error(error && error.stack ? error.stack : String(error));
+  process.exit(1);
+});
+"""
+    proc = subprocess.run(
+        ["node", "-e", script],
+        cwd=Path("./vendor/coinsenda"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
-    with urllib.request.urlopen(req, timeout=20) as response:
-        payload = json.loads(response.read().decode())
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "Coinsenda listPairs failed")
+    payload = json.loads(proc.stdout)
     pairs = payload.get("data", payload)
     for pair in pairs:
         if pair.get("primary_currency") == "usdt" and pair.get("secondary_currency") == "cop":
