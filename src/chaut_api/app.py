@@ -1,7 +1,14 @@
 from fastapi import FastAPI, HTTPException
 
-from .coinsenda import CoinsendaClient, calculate_usdt_from_cop, create_coinsenda_client
+from .coinsenda import (
+    CoinsendaClient,
+    calculate_usdt_from_cop,
+    create_coinsenda_client,
+    get_usdt_cop_sell_price,
+)
 from .models import (
+    CheckoutRequest,
+    CheckoutResponse,
     CreateOrderRequest,
     CreatePaymentRequestRequest,
     InspectPaymentRequestRequest,
@@ -37,6 +44,76 @@ def create_app(
             "service": "proyecto-chaut",
             "environment": settings.environment,
         }
+
+
+    @app.post("/checkout", response_model=CheckoutResponse)
+    def checkout(payload: CheckoutRequest) -> CheckoutResponse:
+        sell_price = get_usdt_cop_sell_price()
+        order_payload = CreateOrderRequest(
+            client_id=payload.client_id,
+            amount_cop_gross=payload.amount_cop,
+            estimated_rate_cop_per_usdt=sell_price,
+        )
+        order = build_order(order_payload, settings.fee_percent)
+        store.put_order(order)
+        store.add_event(order.external_id, "order.created", order.model_dump())
+
+        payment_amount = calculate_usdt_from_cop(order.amount_cop_gross, sell_price)
+        payment_request = coinsenda_client.create_payment_request(
+            order,
+            payload.expiration_minutes,
+            "usdt",
+            payment_amount,
+        )
+        updated_order = store.update_payment_request(
+            external_id=order.external_id,
+            payment_request_id=payment_request.payment_request_id,
+            payment_url=payment_request.payment_url,
+            payment_status=payment_request.status,
+            payment_currency="usdt",
+            payment_amount=payment_amount,
+            sell_price_cop_per_usdt=sell_price,
+        )
+        if updated_order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+        store.add_event(
+            updated_order.external_id,
+            "payment_request.created",
+            {
+                "payment_request_id": payment_request.payment_request_id,
+                "payment_url": payment_request.payment_url,
+                "payment_status": payment_request.status,
+                "payment_currency": "usdt",
+                "payment_amount": payment_amount,
+                "sell_price_cop_per_usdt": sell_price,
+                "fee_asset": updated_order.fee_asset,
+                "coinsenda": payment_request.raw,
+            },
+        )
+
+        inspection = coinsenda_client.inspect_payment_request(updated_order, payload.method)
+        instructions = extract_payment_instructions(inspection)
+        store.add_event(
+            updated_order.external_id,
+            "payment_instructions.inspected",
+            {"click_text": payload.method, "instructions": instructions, "inspection": inspection},
+        )
+        primary_address = (instructions.get("addresses") or [{}])[0].get("address")
+        return CheckoutResponse(
+            external_id=updated_order.external_id,
+            status=updated_order.payment_status,
+            amount_cop=updated_order.amount_cop_gross,
+            pay_amount_cop=instructions.get("amount_cop_text"),
+            pay_to=primary_address,
+            method=payload.method,
+            payment_currency=updated_order.payment_currency,
+            payment_amount=updated_order.payment_amount,
+            sell_price_cop_per_usdt=sell_price,
+            payment_request_id=updated_order.payment_request_id,
+            payment_url=updated_order.payment_url,
+            instructions=instructions,
+            expires_in_minutes=payload.expiration_minutes,
+        )
 
     @app.post("/orders", response_model=OrderResponse)
     def create_order(payload: CreateOrderRequest) -> OrderResponse:

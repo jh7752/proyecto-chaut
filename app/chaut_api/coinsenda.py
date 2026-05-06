@@ -1,5 +1,6 @@
 import json
 import subprocess
+import urllib.request
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -183,3 +184,26 @@ def _format_amount(payment_amount: float, currency: str) -> str:
     if currency == "usdt":
         return f"{payment_amount:.6f}"
     return str(int(payment_amount)) if float(payment_amount).is_integer() else str(payment_amount)
+
+
+def get_usdt_cop_pair() -> dict:
+    req = urllib.request.Request(
+        "https://swap.coinsenda.com/api/pairs/get-all-pairs-for-public",
+        headers={
+            "Accept": "application/json",
+            "Origin": "https://app.coinsenda.com",
+            "Referer": "https://app.coinsenda.com/",
+            "User-Agent": "Mozilla/5.0",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=20) as response:
+        payload = json.loads(response.read().decode())
+    pairs = payload.get("data", payload)
+    for pair in pairs:
+        if pair.get("primary_currency") == "usdt" and pair.get("secondary_currency") == "cop":
+            return pair
+    raise RuntimeError("USDT/COP pair not found in Coinsenda public pairs")
+
+
+def get_usdt_cop_sell_price() -> float:
+    return float(get_usdt_cop_pair()["sell_price"])

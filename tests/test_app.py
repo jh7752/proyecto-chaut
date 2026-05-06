@@ -234,3 +234,32 @@ def test_create_usdt_payment_request_uses_sell_price(tmp_path) -> None:
     assert body["sell_price_cop_per_usdt"] == 3527.5
     assert body["fee_asset"] == "xaut"
     assert body["fee_cop"] == 0
+
+
+def test_checkout_orchestrates_order_payment_request_and_instructions(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    monkeypatch.setattr(app_module, "get_usdt_cop_sell_price", lambda: 3527.5)
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/checkout",
+        json={"client_id": "cli-test", "amount_cop": 5000, "expiration_minutes": 60},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["amount_cop"] == 5000
+    assert body["payment_currency"] == "usdt"
+    assert body["payment_amount"] == 1.417434
+    assert body["sell_price_cop_per_usdt"] == 3527.5
+    assert body["method"] == "Bre-B"
+    assert body["payment_request_id"] == f"mock-pr-{body['external_id']}"
+    assert "DCOP" in body["instructions"]["methods"]
+
+    events = client.get(f"/orders/{body['external_id']}/events").json()
+    assert [event["event_type"] for event in events] == [
+        "order.created",
+        "payment_request.created",
+        "payment_instructions.inspected",
+    ]

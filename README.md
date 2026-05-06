@@ -40,6 +40,7 @@ docker compose up -d --build
 
 Endpoints principales:
 
+- `POST /checkout` - crea orden, consulta sell price, crea PaymentRequest USDT e inspecciona Bre-B en una sola llamada.
 - `GET /health` - estado del servicio.
 - `POST /orders` - crea orden draft, calcula comision y estimado USDT opcional.
 - `GET /orders/{external_id}` - consulta orden guardada.
@@ -97,3 +98,18 @@ Para que el usuario digite COP y pague por Bre-B, Chaut usa el flujo probado con
 5. Inspeccionar/crear provider Bre-B y validar que el COP devuelto por Coinsenda coincida con el COP digitado.
 
 Prueba de referencia: con `sell_price=3527.5`, `5000 COP / 3527.5 = 1.417434 USDT`, y Bre-B pidió `4,999.98 COP`.
+
+## Checkout Unificado
+
+`POST /checkout` es el endpoint de producto para bot o mini-app. Recibe el COP que quiere pagar el usuario y devuelve instrucciones listas:
+
+```json
+{
+  "client_id": "telegram-271173673",
+  "amount_cop": 5000,
+  "method": "Bre-B",
+  "expiration_minutes": 60
+}
+```
+
+Internamente consulta `sell_price` actual de Coinsenda, crea PaymentRequest `usdt`, inspecciona Bre-B y devuelve `pay_amount_cop`, `pay_to`, `payment_url` y auditoria asociada.

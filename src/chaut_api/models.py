@@ -4,6 +4,29 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, PositiveFloat, PositiveInt
 
 
+class CheckoutRequest(BaseModel):
+    client_id: str = Field(min_length=1)
+    amount_cop: PositiveInt
+    expiration_minutes: PositiveInt = Field(default=60, le=1440)
+    method: str = Field(default="Bre-B")
+
+
+class CheckoutResponse(BaseModel):
+    external_id: str
+    status: str
+    amount_cop: int
+    pay_amount_cop: str | None
+    pay_to: str | None
+    method: str
+    payment_currency: str
+    payment_amount: float | None
+    sell_price_cop_per_usdt: float
+    payment_request_id: str | None
+    payment_url: str | None
+    instructions: dict
+    expires_in_minutes: int
+
+
 class CreateOrderRequest(BaseModel):
     client_id: str = Field(min_length=1)
     amount_cop_gross: PositiveInt
