@@ -219,3 +219,15 @@ El primer modulo queda concluido como MVP operativo:
 - Conciliacion: endpoint separado para verificar estado contra Coinsenda antes de confirmar pagos.
 
 Validacion de precio: `/checkout` compara `pay_amount_cop` contra `amount_cop`. Si el deslizamiento supera `max_price_slippage_cop`, registra `checkout.price_mismatch` y reintenta hasta `max_retries`. Si el ultimo intento sigue fuera de tolerancia, responde `checkout_status=price_mismatch` para no entregar instrucciones como listas.
+
+
+### Bybit Worker SSM Bridge
+
+Chaut Core puede usar el worker de Mumbai sin abrir puertos publicos configurando:
+
+```text
+CHAUT_BYBIT_WORKER_INSTANCE_ID=i-02a3c86e7d934c601
+CHAUT_BYBIT_WORKER_REGION=ap-south-1
+```
+
+Si esas variables estan presentes, los endpoints Bybit y `xaut-quote` ejecutan la consulta en el worker via SSM. Si no estan presentes, intentan la llamada directa desde el core.

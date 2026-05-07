@@ -11,3 +11,5 @@ class Settings(BaseSettings):
     coinsenda_mode: str = Field(default="mock")
     coinsenda_app_origin: str = Field(default="https://app.coinsenda.com")
     coinsenda_runtime_dir: str = Field(default="./vendor/coinsenda")
+    bybit_worker_instance_id: str | None = Field(default=None)
+    bybit_worker_region: str = Field(default="ap-south-1")

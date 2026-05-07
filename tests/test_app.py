@@ -459,7 +459,7 @@ def test_bybit_public_endpoints(monkeypatch, tmp_path) -> None:
                 "raw": {"retCode": 0},
             }
 
-    monkeypatch.setattr(app_module, "BybitClient", StubBybitClient)
+    monkeypatch.setattr(app_module, "create_bybit_client", lambda *args, **kwargs: StubBybitClient())
     client = make_client(tmp_path)
 
     assert client.get("/bybit/health").json() == {
@@ -484,7 +484,7 @@ def test_xaut_quote_requires_confirmed_payment(monkeypatch, tmp_path) -> None:
                 "raw": {"retCode": 0},
             }
 
-    monkeypatch.setattr(app_module, "BybitClient", StubBybitClient)
+    monkeypatch.setattr(app_module, "create_bybit_client", lambda *args, **kwargs: StubBybitClient())
     client = make_client_with_coinsenda(tmp_path, AcceptedCoinsendaClient())
     order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 5000}).json()
 
@@ -524,7 +524,7 @@ def test_xaut_quote_applies_fee_before_user_grams(monkeypatch, tmp_path) -> None
                 "raw": {"retCode": 0},
             }
 
-    monkeypatch.setattr(app_module, "BybitClient", StubBybitClient)
+    monkeypatch.setattr(app_module, "create_bybit_client", lambda *args, **kwargs: StubBybitClient())
     client = make_client_with_coinsenda(tmp_path, AcceptedUsdtCoinsendaClient())
     order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 2000}).json()
     client.post(

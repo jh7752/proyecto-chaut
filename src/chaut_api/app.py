@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 
-from .bybit import BybitClient, quote_xaut_from_usdt
+from .bybit import create_bybit_client, quote_xaut_from_usdt
 
 from .coinsenda import (
     CoinsendaClient,
@@ -88,15 +88,15 @@ def create_app(
 
     @app.get("/bybit/health", response_model=BybitHealthResponse)
     def bybit_health() -> BybitHealthResponse:
-        return BybitHealthResponse(**BybitClient().health())
+        return BybitHealthResponse(**create_bybit_client(settings.bybit_worker_instance_id, settings.bybit_worker_region).health())
 
     @app.get("/bybit/xaut-ticker", response_model=BybitTickerResponse)
     def bybit_xaut_ticker() -> BybitTickerResponse:
-        return BybitTickerResponse(**BybitClient().get_xaut_ticker())
+        return BybitTickerResponse(**create_bybit_client(settings.bybit_worker_instance_id, settings.bybit_worker_region).get_xaut_ticker())
 
     @app.get("/bybit/xaut-instrument", response_model=BybitInstrumentResponse)
     def bybit_xaut_instrument() -> BybitInstrumentResponse:
-        return BybitInstrumentResponse(**BybitClient().get_xaut_instrument())
+        return BybitInstrumentResponse(**create_bybit_client(settings.bybit_worker_instance_id, settings.bybit_worker_region).get_xaut_instrument())
 
     @app.post("/checkout", response_model=CheckoutResponse)
     def checkout(payload: CheckoutRequest) -> CheckoutResponse:
@@ -265,7 +265,7 @@ def create_app(
         if order.payment_currency != "usdt" or order.payment_amount is None:
             raise HTTPException(status_code=409, detail="Order does not have confirmed USDT amount")
 
-        ticker = BybitClient().get_xaut_ticker()
+        ticker = create_bybit_client(settings.bybit_worker_instance_id, settings.bybit_worker_region).get_xaut_ticker()
         ask_price = float(ticker["ask1Price"] or ticker["lastPrice"])
         quote = quote_xaut_from_usdt(order.payment_amount, ask_price, order.fee_percent)
         payload = {
