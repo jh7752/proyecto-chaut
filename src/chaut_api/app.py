@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 
-from .bybit import BybitClient
+from .bybit import BybitClient, quote_xaut_from_usdt
 
 from .coinsenda import (
     CoinsendaClient,
@@ -22,6 +22,7 @@ from .models import (
     EventResponse,
     OrderResponse,
     PaymentInstructionsResponse,
+    XautQuoteResponse,
     build_order,
 )
 from .payment_instructions import extract_payment_instructions, parse_cop_amount
@@ -253,6 +254,30 @@ def create_app(
         if order is None:
             raise HTTPException(status_code=404, detail="Order not found")
         return order
+
+    @app.post("/orders/{external_id}/xaut-quote", response_model=XautQuoteResponse)
+    def create_xaut_quote(external_id: str) -> XautQuoteResponse:
+        order = store.get_order(external_id)
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+        if order.payment_status != "confirmed":
+            raise HTTPException(status_code=409, detail="Order payment is not confirmed")
+        if order.payment_currency != "usdt" or order.payment_amount is None:
+            raise HTTPException(status_code=409, detail="Order does not have confirmed USDT amount")
+
+        ticker = BybitClient().get_xaut_ticker()
+        ask_price = float(ticker["ask1Price"] or ticker["lastPrice"])
+        quote = quote_xaut_from_usdt(order.payment_amount, ask_price, order.fee_percent)
+        payload = {
+            "external_id": order.external_id,
+            "customer_id": order.customer_id,
+            "payment_status": order.payment_status,
+            "source": "bybit_public_ticker",
+            "ticker": ticker,
+            **quote,
+        }
+        store.add_event(order.external_id, "xaut.quote_created", payload)
+        return XautQuoteResponse(**payload)
 
     @app.post("/orders/{external_id}/payment-request", response_model=OrderResponse)
     def create_payment_request(

@@ -469,3 +469,81 @@ def test_bybit_public_endpoints(monkeypatch, tmp_path) -> None:
     }
     assert client.get("/bybit/xaut-ticker").json()["lastPrice"] == "3300.12"
     assert client.get("/bybit/xaut-instrument").json()["baseCoin"] == "XAUT"
+
+
+def test_xaut_quote_requires_confirmed_payment(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class StubBybitClient:
+        def get_xaut_ticker(self):
+            return {
+                "category": "spot",
+                "symbol": "XAUTUSDT",
+                "ask1Price": "4692.8",
+                "lastPrice": "4692.0",
+                "raw": {"retCode": 0},
+            }
+
+    monkeypatch.setattr(app_module, "BybitClient", StubBybitClient)
+    client = make_client_with_coinsenda(tmp_path, AcceptedCoinsendaClient())
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 5000}).json()
+
+    response = client.post(f"/orders/{order['external_id']}/xaut-quote")
+
+    assert response.status_code == 409
+
+
+def test_xaut_quote_applies_fee_before_user_grams(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class AcceptedUsdtCoinsendaClient(AcceptedCoinsendaClient):
+        def check_payment_request(self, order):
+            from chaut_api.coinsenda import PaymentRequestStatus
+
+            return PaymentRequestStatus(
+                payment_status="payment_confirmed",
+                raw={
+                    "event_type": "payment_confirmed",
+                    "payment_request": {
+                        "id": order.payment_request_id,
+                        "state": "accepted",
+                        "external_id": order.external_id,
+                        "amount": str(order.payment_amount),
+                        "currency": "usdt",
+                    },
+                },
+            )
+
+    class StubBybitClient:
+        def get_xaut_ticker(self):
+            return {
+                "category": "spot",
+                "symbol": "XAUTUSDT",
+                "ask1Price": "4692.8",
+                "lastPrice": "4692.0",
+                "raw": {"retCode": 0},
+            }
+
+    monkeypatch.setattr(app_module, "BybitClient", StubBybitClient)
+    client = make_client_with_coinsenda(tmp_path, AcceptedUsdtCoinsendaClient())
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 2000}).json()
+    client.post(
+        f"/orders/{order['external_id']}/payment-request",
+        json={"currency": "usdt", "sell_price_cop_per_usdt": 3527.49},
+    )
+    client.post(f"/orders/{order['external_id']}/reconcile-payment")
+
+    response = client.post(f"/orders/{order['external_id']}/xaut-quote")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "quoted"
+    assert body["confirmed_usdt"] == 0.566975
+    assert body["xaut_ask_price"] == 4692.8
+    assert body["fee_percent"] == 0.5
+    assert body["xaut_gross"] > body["xaut_net"]
+    assert body["fee_xaut"] > 0
+    assert body["gold_grams_gross"] > body["gold_grams_net"]
+    events = client.get(f"/orders/{order['external_id']}/events").json()
+    assert events[-1]["event_type"] == "xaut.quote_created"
+    assert events[-1]["payload"]["gold_grams_net"] == body["gold_grams_net"]

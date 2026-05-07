@@ -44,3 +44,21 @@ def _first_result(payload: dict) -> dict:
     if not items:
         raise RuntimeError("Bybit returned no XAUTUSDT data")
     return items[0]
+
+
+def quote_xaut_from_usdt(confirmed_usdt: float, ask_price: float, fee_percent: float) -> dict:
+    xaut_gross = confirmed_usdt / ask_price
+    fee_xaut = xaut_gross * (fee_percent / 100)
+    xaut_net = xaut_gross - fee_xaut
+    grams_per_xaut = 31.1034768
+    return {
+        "confirmed_usdt": round(confirmed_usdt, 8),
+        "xaut_ask_price": ask_price,
+        "fee_percent": fee_percent,
+        "fee_xaut": round(fee_xaut, 12),
+        "xaut_gross": round(xaut_gross, 12),
+        "xaut_net": round(xaut_net, 12),
+        "gold_grams_gross": round(xaut_gross * grams_per_xaut, 12),
+        "gold_grams_net": round(xaut_net * grams_per_xaut, 12),
+        "status": "quoted",
+    }

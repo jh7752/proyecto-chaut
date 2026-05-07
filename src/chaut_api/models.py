@@ -151,6 +151,23 @@ class BybitInstrumentResponse(BaseModel):
     raw: dict
 
 
+class XautQuoteResponse(BaseModel):
+    external_id: str
+    customer_id: str | None = None
+    payment_status: str
+    confirmed_usdt: float
+    xaut_ask_price: float
+    fee_percent: float
+    fee_xaut: float
+    xaut_gross: float
+    xaut_net: float
+    gold_grams_gross: float
+    gold_grams_net: float
+    status: str
+    source: str
+    ticker: dict
+
+
 class EventResponse(BaseModel):
     event_id: str
     entity_id: str

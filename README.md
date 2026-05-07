@@ -59,6 +59,25 @@ Estado actual: persistencia local en volumen Docker para MVP/test.
 
 La comisión ya no se descuenta en COP. El usuario paga el COP digitado; la comisión se aplicará después sobre XAUT cuando exista el módulo de compra.
 
+## XAUT Quote
+
+Cuando una orden ya tiene `payment_status=confirmed` y `payment_currency=usdt`, Chaut puede generar una cotizacion indicativa de oro digital:
+
+```text
+POST /orders/{external_id}/xaut-quote
+```
+
+La cotizacion usa el `ask1Price` publico de Bybit `XAUTUSDT`, calcula XAUT bruto, descuenta el fee de Chaut en XAUT y solo entrega al usuario la cifra neta:
+
+```text
+xaut_gross = confirmed_usdt / ask_price
+fee_xaut = xaut_gross * fee_percent / 100
+xaut_net = xaut_gross - fee_xaut
+gold_grams_net = xaut_net * 31.1034768
+```
+
+Esto no compra XAUT ni mueve fondos. Registra evento `xaut.quote_created`. La liquidacion final requiere ejecucion real en Bybit.
+
 ## Bybit Public API
 
 Primer paso seguro de integracion Bybit: solo endpoints publicos, sin API keys y sin mover fondos.
