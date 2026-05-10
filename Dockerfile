@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm
+FROM mcr.microsoft.com/playwright/python:v1.56.1-noble
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -12,7 +12,6 @@ COPY src ./src
 COPY vendor ./vendor
 RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir .
 RUN if [ -f vendor/coinsenda/package-lock.json ]; then npm ci --prefix vendor/coinsenda --omit=dev; else npm install --prefix vendor/coinsenda --omit=dev; fi
-RUN npx --prefix vendor/coinsenda playwright install chromium --with-deps
 
 EXPOSE 8000
 CMD ["uvicorn", "chaut_api.app:app", "--host", "0.0.0.0", "--port", "8000"]
