@@ -12,6 +12,7 @@ COPY src ./src
 COPY vendor ./vendor
 RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir .
 RUN if [ -f vendor/coinsenda/package-lock.json ]; then npm ci --prefix vendor/coinsenda --omit=dev; else npm install --prefix vendor/coinsenda --omit=dev; fi
+RUN ln -s /ms-playwright/chromium-1194 /ms-playwright/chromium-1217
 
 EXPOSE 8000
 CMD ["uvicorn", "chaut_api.app:app", "--host", "0.0.0.0", "--port", "8000"]
