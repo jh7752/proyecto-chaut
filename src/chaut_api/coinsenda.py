@@ -157,9 +157,8 @@ class ScriptCoinsendaClient(CoinsendaClient):
     def _run_json(self, script_name: str, *args: str, allowed_return_codes: tuple[int, ...] = (0, 2)) -> dict:
         script = self._runtime_dir / "scripts" / script_name
         env = os.environ.copy()
-        browser_path = env.get("PLAYWRIGHT_BROWSERS_PATH")
-        if browser_path:
-            env["PLAYWRIGHT_BROWSERS_PATH"] = browser_path
+        browser_path = env.get("PLAYWRIGHT_BROWSERS_PATH", "/ms-playwright")
+        env["PLAYWRIGHT_BROWSERS_PATH"] = browser_path
         proc = subprocess.run(
             ["node", str(script), *args],
             cwd=self._runtime_dir,
