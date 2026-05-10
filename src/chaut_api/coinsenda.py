@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import urllib.request
 from dataclasses import dataclass
@@ -155,6 +156,10 @@ class ScriptCoinsendaClient(CoinsendaClient):
 
     def _run_json(self, script_name: str, *args: str, allowed_return_codes: tuple[int, ...] = (0, 2)) -> dict:
         script = self._runtime_dir / "scripts" / script_name
+        env = os.environ.copy()
+        browser_path = env.get("PLAYWRIGHT_BROWSERS_PATH")
+        if browser_path:
+            env["PLAYWRIGHT_BROWSERS_PATH"] = browser_path
         proc = subprocess.run(
             ["node", str(script), *args],
             cwd=self._runtime_dir,
@@ -162,6 +167,7 @@ class ScriptCoinsendaClient(CoinsendaClient):
             capture_output=True,
             text=True,
             timeout=60,
+            env=env,
         )
         if proc.returncode not in allowed_return_codes:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "Coinsenda script failed")
