@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 
-from .bybit import create_bybit_client, quote_xaut_from_usdt
+from .bybit import create_bybit_client
+from .kucoin import create_kucoin_client, quote_xaut_from_usdt
 
 from .coinsenda import (
     CoinsendaClient,
@@ -14,6 +15,9 @@ from .models import (
     BybitHealthResponse,
     BybitInstrumentResponse,
     BybitTickerResponse,
+    KucoinHealthResponse,
+    KucoinInstrumentResponse,
+    KucoinTickerResponse,
     CheckoutRequest,
     CheckoutResponse,
     CreateOrderRequest,
@@ -97,6 +101,18 @@ def create_app(
     @app.get("/bybit/xaut-instrument", response_model=BybitInstrumentResponse)
     def bybit_xaut_instrument() -> BybitInstrumentResponse:
         return BybitInstrumentResponse(**create_bybit_client(settings.bybit_worker_instance_id, settings.bybit_worker_region).get_xaut_instrument())
+
+    @app.get("/kucoin/health", response_model=KucoinHealthResponse)
+    def kucoin_health() -> KucoinHealthResponse:
+        return KucoinHealthResponse(**create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol).health())
+
+    @app.get("/kucoin/xaut-ticker", response_model=KucoinTickerResponse)
+    def kucoin_xaut_ticker() -> KucoinTickerResponse:
+        return KucoinTickerResponse(**create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol).get_xaut_ticker())
+
+    @app.get("/kucoin/xaut-instrument", response_model=KucoinInstrumentResponse)
+    def kucoin_xaut_instrument() -> KucoinInstrumentResponse:
+        return KucoinInstrumentResponse(**create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol).get_xaut_instrument())
 
     @app.post("/checkout", response_model=CheckoutResponse)
     def checkout(payload: CheckoutRequest) -> CheckoutResponse:
@@ -265,14 +281,14 @@ def create_app(
         if order.payment_currency != "usdt" or order.payment_amount is None:
             raise HTTPException(status_code=409, detail="Order does not have confirmed USDT amount")
 
-        ticker = create_bybit_client(settings.bybit_worker_instance_id, settings.bybit_worker_region).get_xaut_ticker()
-        ask_price = float(ticker["ask1Price"] or ticker["lastPrice"])
+        ticker = create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol).get_xaut_ticker()
+        ask_price = float(ticker["bestAsk"] or ticker["price"])
         quote = quote_xaut_from_usdt(order.payment_amount, ask_price, order.fee_percent)
         payload = {
             "external_id": order.external_id,
             "customer_id": order.customer_id,
             "payment_status": order.payment_status,
-            "source": "bybit_public_ticker",
+            "source": "kucoin_public_ticker",
             "ticker": ticker,
             **quote,
         }

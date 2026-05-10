@@ -471,20 +471,62 @@ def test_bybit_public_endpoints(monkeypatch, tmp_path) -> None:
     assert client.get("/bybit/xaut-instrument").json()["baseCoin"] == "XAUT"
 
 
-def test_xaut_quote_requires_confirmed_payment(monkeypatch, tmp_path) -> None:
+def test_kucoin_public_endpoints(monkeypatch, tmp_path) -> None:
     import chaut_api.app as app_module
 
-    class StubBybitClient:
+    class StubKucoinClient:
+        def health(self):
+            return {"status": "ok", "source": "kucoin", "symbol": "XAUT-USDT"}
+
         def get_xaut_ticker(self):
             return {
                 "category": "spot",
-                "symbol": "XAUTUSDT",
-                "ask1Price": "4692.8",
-                "lastPrice": "4692.0",
-                "raw": {"retCode": 0},
+                "symbol": "XAUT-USDT",
+                "price": "4710.47",
+                "bestBid": "4710.47",
+                "bestAsk": "4710.48",
+                "raw": {"code": "200000"},
             }
 
-    monkeypatch.setattr(app_module, "create_bybit_client", lambda *args, **kwargs: StubBybitClient())
+        def get_xaut_instrument(self):
+            return {
+                "category": "spot",
+                "symbol": "XAUT-USDT",
+                "baseCurrency": "XAUT",
+                "quoteCurrency": "USDT",
+                "baseMinSize": "0.0001",
+                "baseIncrement": "0.0001",
+                "priceIncrement": "0.01",
+                "enableTrading": True,
+                "raw": {"symbol": "XAUT-USDT"},
+            }
+
+    monkeypatch.setattr(app_module, "create_kucoin_client", lambda *args, **kwargs: StubKucoinClient())
+    client = make_client(tmp_path)
+
+    assert client.get("/kucoin/health").json() == {
+        "status": "ok",
+        "source": "kucoin",
+        "symbol": "XAUT-USDT",
+    }
+    assert client.get("/kucoin/xaut-ticker").json()["bestAsk"] == "4710.48"
+    assert client.get("/kucoin/xaut-instrument").json()["baseCurrency"] == "XAUT"
+
+
+def test_xaut_quote_requires_confirmed_payment(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class StubKucoinClient:
+        def get_xaut_ticker(self):
+            return {
+                "category": "spot",
+                "symbol": "XAUT-USDT",
+                "bestAsk": "4692.8",
+                "price": "4692.0",
+                "raw": {"code": "200000"},
+            }
+
+    monkeypatch.setattr(app_module, "create_kucoin_client", lambda *args, **kwargs: StubKucoinClient())
     client = make_client_with_coinsenda(tmp_path, AcceptedCoinsendaClient())
     order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 5000}).json()
 
@@ -514,17 +556,17 @@ def test_xaut_quote_applies_fee_before_user_grams(monkeypatch, tmp_path) -> None
                 },
             )
 
-    class StubBybitClient:
+    class StubKucoinClient:
         def get_xaut_ticker(self):
             return {
                 "category": "spot",
-                "symbol": "XAUTUSDT",
-                "ask1Price": "4692.8",
-                "lastPrice": "4692.0",
-                "raw": {"retCode": 0},
+                "symbol": "XAUT-USDT",
+                "bestAsk": "4692.8",
+                "price": "4692.0",
+                "raw": {"code": "200000"},
             }
 
-    monkeypatch.setattr(app_module, "create_bybit_client", lambda *args, **kwargs: StubBybitClient())
+    monkeypatch.setattr(app_module, "create_kucoin_client", lambda *args, **kwargs: StubKucoinClient())
     client = make_client_with_coinsenda(tmp_path, AcceptedUsdtCoinsendaClient())
     order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 2000}).json()
     client.post(

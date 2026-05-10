@@ -48,6 +48,9 @@ Endpoints principales:
 - `GET /bybit/health` - prueba conexion publica Bybit para XAUTUSDT.
 - `GET /bybit/xaut-ticker` - precio publico spot XAUTUSDT.
 - `GET /bybit/xaut-instrument` - filtros/precision publica del instrumento spot XAUTUSDT.
+- `GET /kucoin/health` - prueba conexion publica KuCoin para XAUT-USDT.
+- `GET /kucoin/xaut-ticker` - precio publico spot KuCoin XAUT-USDT.
+- `GET /kucoin/xaut-instrument` - filtros/precision publica del instrumento spot KuCoin XAUT-USDT.
 - `POST /orders` - crea orden draft, calcula comision y estimado USDT opcional.
 - `GET /orders/{external_id}` - consulta orden guardada.
 - `GET /orders/{external_id}/events` - lista eventos auditables de la orden.
@@ -67,7 +70,7 @@ Cuando una orden ya tiene `payment_status=confirmed` y `payment_currency=usdt`, 
 POST /orders/{external_id}/xaut-quote
 ```
 
-La cotizacion usa el `ask1Price` publico de Bybit `XAUTUSDT`, calcula XAUT bruto, descuenta el fee de Chaut en XAUT y solo entrega al usuario la cifra neta:
+La cotizacion usa el `bestAsk` publico de KuCoin `XAUT-USDT`, calcula XAUT bruto, descuenta el fee de Chaut en XAUT y solo entrega al usuario la cifra neta:
 
 ```text
 xaut_gross = confirmed_usdt / ask_price
@@ -76,7 +79,7 @@ xaut_net = xaut_gross - fee_xaut
 gold_grams_net = xaut_net * 31.1034768
 ```
 
-Esto no compra XAUT ni mueve fondos. Registra evento `xaut.quote_created`. La liquidacion final requiere ejecucion real en Bybit.
+Esto no compra XAUT ni mueve fondos. Registra evento `xaut.quote_created`. La liquidacion final requiere ejecucion real en el venue aprobado.
 
 ## Bybit Public API
 
@@ -88,7 +91,7 @@ GET /bybit/xaut-ticker
 GET /bybit/xaut-instrument
 ```
 
-Usan Bybit V5 public market API para `category=spot&symbol=XAUTUSDT`. Estos endpoints sirven para validar disponibilidad de XAUTUSDT, precio publico y filtros del instrumento antes de conectar llaves privadas o ejecutar compras.
+Los endpoints KuCoin usan API publica spot para `XAUT-USDT`. Estos endpoints sirven para validar disponibilidad, precio publico y filtros del instrumento antes de conectar llaves privadas o ejecutar compras. Bybit queda como integracion legacy/provisional.
 
 La liquidacion final en gramos de oro digital debe esperar conexion privada/operativa con Bybit y ejecucion real o quote operativo confirmado.
 
