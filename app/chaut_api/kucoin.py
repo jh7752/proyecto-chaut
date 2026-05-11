@@ -269,11 +269,13 @@ def prepare_xaut_market_buy(
     gross = (funds / ask).quantize(increment, rounding=ROUND_DOWN)
     fee = (gross * Decimal(str(fee_percent)) / Decimal("100")).quantize(Decimal("0.000000000001"), rounding=ROUND_DOWN)
     net = gross - fee
+    executable_funds = funds.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
     return {
         "symbol": symbol,
         "order_type": "market",
         "side": "buy",
-        "funds": str(funds),
+        "funds": str(executable_funds),
+        "confirmed_usdt": str(funds),
         "estimated_xaut_gross": str(gross),
         "fee_xaut": str(fee),
         "estimated_xaut_net": str(net),
