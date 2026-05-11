@@ -15,3 +15,5 @@ class Settings(BaseSettings):
     bybit_worker_region: str = Field(default="ap-south-1")
     kucoin_base_url: str = Field(default="https://api.kucoin.com")
     kucoin_xaut_symbol: str = Field(default="XAUT-USDT")
+    kucoin_worker_instance_id: str | None = Field(default=None)
+    kucoin_worker_region: str = Field(default="ap-south-1")

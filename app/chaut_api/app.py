@@ -1,7 +1,13 @@
 from fastapi import FastAPI, HTTPException
 
 from .bybit import create_bybit_client
-from .kucoin import create_kucoin_client, quote_xaut_from_usdt
+from .kucoin import (
+    create_kucoin_client,
+    create_kucoin_private_client,
+    prepare_xaut_market_buy,
+    quote_xaut_from_usdt,
+    summarize_accounts,
+)
 
 from .coinsenda import (
     CoinsendaClient,
@@ -113,6 +119,53 @@ def create_app(
     @app.get("/kucoin/xaut-instrument", response_model=KucoinInstrumentResponse)
     def kucoin_xaut_instrument() -> KucoinInstrumentResponse:
         return KucoinInstrumentResponse(**create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol).get_xaut_instrument())
+
+    @app.get("/kucoin/accounts")
+    def kucoin_accounts(currency: str | None = None) -> dict:
+        client = create_kucoin_private_client(settings.kucoin_worker_instance_id, settings.kucoin_worker_region)
+        payload = client.accounts(currency)
+        return {"source": "kucoin-worker-ssm" if settings.kucoin_worker_instance_id else "kucoin-direct", "accounts": summarize_accounts(payload)}
+
+    @app.post("/kucoin/transfer-main-to-trade")
+    def kucoin_transfer_main_to_trade(currency: str = "USDT", amount: str = "2") -> dict:
+        client = create_kucoin_private_client(settings.kucoin_worker_instance_id, settings.kucoin_worker_region)
+        payload = client.inner_transfer(currency, amount, "main", "trade")
+        return {"source": "kucoin-worker-ssm" if settings.kucoin_worker_instance_id else "kucoin-direct", "result": payload}
+
+    @app.post("/orders/{external_id}/xaut-prepare-order")
+    def prepare_xaut_order(external_id: str) -> dict:
+        order = store.get_order(external_id)
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+        if order.payment_status != "confirmed":
+            raise HTTPException(status_code=409, detail="Order payment is not confirmed")
+        if order.payment_currency != "usdt" or order.payment_amount is None:
+            raise HTTPException(status_code=409, detail="Order does not have confirmed USDT amount")
+        public = create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol)
+        ticker = public.get_xaut_ticker()
+        instrument = public.get_xaut_instrument()
+        prepared = prepare_xaut_market_buy(
+            order.payment_amount,
+            float(ticker["bestAsk"] or ticker["price"]),
+            order.fee_percent,
+            instrument.get("baseIncrement") or "0.0001",
+            instrument.get("minFunds") or "0.1",
+            settings.kucoin_xaut_symbol,
+        )
+        payload = {"external_id": order.external_id, "customer_id": order.customer_id, "ticker": ticker, "instrument": instrument, **prepared}
+        store.add_event(order.external_id, "xaut.order_prepared", payload)
+        return payload
+
+    @app.post("/orders/{external_id}/xaut-execute-market-buy")
+    def execute_xaut_market_buy(external_id: str, confirm: str = "") -> dict:
+        if confirm != "EXECUTE_TEST_BUY":
+            raise HTTPException(status_code=409, detail="Missing explicit EXECUTE_TEST_BUY confirmation")
+        prepared = prepare_xaut_order(external_id)
+        client = create_kucoin_private_client(settings.kucoin_worker_instance_id, settings.kucoin_worker_region)
+        result = client.place_market_buy(prepared["symbol"], prepared["funds"])
+        payload = {"external_id": external_id, "prepared": prepared, "kucoin": result}
+        store.add_event(external_id, "xaut.order_submitted", payload)
+        return payload
 
     @app.post("/checkout", response_model=CheckoutResponse)
     def checkout(payload: CheckoutRequest) -> CheckoutResponse:
