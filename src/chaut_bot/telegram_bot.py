@@ -37,8 +37,10 @@ def handle_update(update: dict[str, Any]) -> None:
         return
     if PENDING_NAMES.get(chat_id) and text and not text.startswith("/"):
         register_name(chat_id, user, text)
-    elif text.startswith(("/start", "/ahorros")):
-        ensure_account_then_menu(chat_id, user)
+    elif text.startswith("/start"):
+        send_welcome(chat_id)
+    elif text.startswith("/ahorros"):
+        send_savings_menu(chat_id, "Que gusto tenerte por aqui. Que quieres hacer hoy?")
     elif text.startswith("/saldo"):
         send_balance(chat_id, user)
     elif text.startswith("/movimientos"):
@@ -55,7 +57,7 @@ def handle_update(update: dict[str, Any]) -> None:
         else:
             create_checkout(chat_id, user, int(text))
     elif text.lower() in {"hola", "buenas", "hello", "hi"}:
-        ensure_account_then_menu(chat_id, user)
+        send_welcome(chat_id)
     else:
         send_text(chat_id, "Hola. Soy tu bot de ahorros en oro digital. Usa /ahorros para empezar o /saldo para ver tu cuenta.")
 
@@ -72,6 +74,8 @@ def handle_callback(callback: dict[str, Any]) -> None:
         return
     if data == "register":
         ask_name(chat_id)
+    elif data == "menu:ahorros":
+        send_savings_menu(chat_id, "Perfecto. Cuanto quieres ahorrar hoy?")
     elif data.startswith("ahorros:") and not account_exists(user.get("id", chat_id)):
         send_text(chat_id, "Con mucho gusto. Primero dime tu nombre para dejar tu cuenta bien organizada.")
         ask_name(chat_id)
@@ -87,6 +91,16 @@ def handle_callback(callback: dict[str, Any]) -> None:
         send_balance(chat_id, user)
     elif data == "movimientos":
         send_movements(chat_id, user)
+
+
+def send_welcome(chat_id: int) -> None:
+    send_text(
+        chat_id,
+        "Hola, que gusto tenerte por aqui. Soy tu bot de ahorros en OD (oro digital).\n\nPuedes empezar cuando quieras, sin afan.",
+        buttons=[
+            [{"text": "Quiero ahorrar", "callback_data": "menu:ahorros"}, {"text": "Ver saldo", "callback_data": "saldo"}],
+        ],
+    )
 
 
 def ensure_account_then_menu(chat_id: int, user: dict[str, Any]) -> None:
