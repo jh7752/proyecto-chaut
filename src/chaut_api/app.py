@@ -157,6 +157,51 @@ def create_app(
         payload = client.inner_transfer(currency, amount, "main", "trade")
         return {"source": "kucoin-worker-ssm" if settings.kucoin_worker_instance_id else "kucoin-direct", "result": payload}
 
+    def existing_filled_xaut_event(external_id: str) -> dict | None:
+        for event in reversed(store.list_events(external_id)):
+            if event.event_type == "xaut.order_filled":
+                return event.payload
+        return None
+
+    def build_xaut_user_summary(external_id: str, fill: dict) -> dict:
+        xaut_net = fill.get("xaut_net")
+        grams_net = fill.get("gold_grams_net")
+        return {
+            "external_id": external_id,
+            "status": "xaut_bought",
+            "xaut_net": xaut_net,
+            "gold_grams_net": grams_net,
+            "message": f"Compra completada: recibiste {grams_net} gramos de oro digital ({xaut_net} XAUT neto).",
+        }
+
+    def run_xaut_market_buy(external_id: str) -> dict:
+        already_filled = existing_filled_xaut_event(external_id)
+        if already_filled is not None:
+            fill = already_filled.get("order", {})
+            return {
+                "external_id": external_id,
+                "status": "already_settled",
+                "idempotent": True,
+                "order": fill,
+                "user_summary": build_xaut_user_summary(external_id, fill),
+                "original": already_filled,
+            }
+
+        prepared = prepare_xaut_order(external_id)
+        client = create_htx_private_client(settings.htx_worker_instance_id, settings.htx_worker_region)
+        result = client.place_market_buy(prepared["symbol"], prepared["funds"])
+        order_id = str(result.get("data"))
+        order_detail = client.order(order_id)
+        fill = summarize_filled_order(order_detail)
+        payload = {"external_id": external_id, "prepared": prepared, "htx": result, "order": fill}
+        store.add_event(external_id, "xaut.order_submitted", payload)
+        if fill["state"] == "filled":
+            store.add_event(external_id, "xaut.order_filled", payload)
+        payload["status"] = "settled" if fill["state"] == "filled" else "submitted"
+        payload["idempotent"] = False
+        payload["user_summary"] = build_xaut_user_summary(external_id, fill)
+        return payload
+
     @app.post("/orders/{external_id}/xaut-prepare-order")
     def prepare_xaut_order(external_id: str) -> dict:
         order = store.get_order(external_id)
@@ -187,17 +232,24 @@ def create_app(
     def execute_xaut_market_buy(external_id: str, confirm: str = "") -> dict:
         if confirm != "EXECUTE_HTX_XAUT_BUY":
             raise HTTPException(status_code=409, detail="Missing explicit EXECUTE_HTX_XAUT_BUY confirmation")
-        prepared = prepare_xaut_order(external_id)
-        client = create_htx_private_client(settings.htx_worker_instance_id, settings.htx_worker_region)
-        result = client.place_market_buy(prepared["symbol"], prepared["funds"])
-        order_id = str(result.get("data"))
-        order_detail = client.order(order_id)
-        fill = summarize_filled_order(order_detail)
-        payload = {"external_id": external_id, "prepared": prepared, "htx": result, "order": fill}
-        store.add_event(external_id, "xaut.order_submitted", payload)
-        if fill["state"] == "filled":
-            store.add_event(external_id, "xaut.order_filled", payload)
-        return payload
+        return run_xaut_market_buy(external_id)
+
+    @app.post("/orders/{external_id}/settle-xaut")
+    def settle_xaut_after_payment(external_id: str, confirm: str = "") -> dict:
+        if confirm != "EXECUTE_HTX_XAUT_BUY":
+            raise HTTPException(status_code=409, detail="Missing explicit EXECUTE_HTX_XAUT_BUY confirmation")
+        order = reconcile_payment(external_id)
+        if order.payment_status != "confirmed":
+            return {
+                "external_id": external_id,
+                "status": "payment_not_confirmed",
+                "payment_status": order.payment_status,
+                "executed": False,
+            }
+        result = run_xaut_market_buy(external_id)
+        result["payment_status"] = order.payment_status
+        result["executed"] = not result.get("idempotent", False)
+        return result
 
     @app.post("/checkout", response_model=CheckoutResponse)
     def checkout(payload: CheckoutRequest) -> CheckoutResponse:

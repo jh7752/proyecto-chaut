@@ -638,3 +638,118 @@ def test_xaut_quote_applies_fee_before_user_grams(monkeypatch, tmp_path) -> None
     events = client.get(f"/orders/{order['external_id']}/events").json()
     assert events[-1]["event_type"] == "xaut.quote_created"
     assert events[-1]["payload"]["gold_grams_net"] == body["gold_grams_net"]
+
+
+def test_execute_xaut_market_buy_is_idempotent(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class AcceptedUsdtCoinsendaClient(AcceptedCoinsendaClient):
+        def check_payment_request(self, order):
+            from chaut_api.coinsenda import PaymentRequestStatus
+
+            return PaymentRequestStatus(
+                payment_status="payment_confirmed",
+                raw={
+                    "event_type": "payment_confirmed",
+                    "payment_request": {
+                        "id": order.payment_request_id,
+                        "state": "accepted",
+                        "external_id": order.external_id,
+                        "amount": str(order.payment_amount),
+                        "currency": "usdt",
+                    },
+                },
+            )
+
+    class StubHtxClient:
+        calls = 0
+
+        def get_xaut_ticker(self):
+            return {"category": "spot", "symbol": "xautusdt", "bestAsk": "4700", "price": "4700", "raw": {"status": "ok"}}
+
+        def get_xaut_instrument(self):
+            return {"category": "spot", "symbol": "xautusdt", "min-order-value": 1, "raw": {"status": "ok"}}
+
+    class StubHtxPrivateClient:
+        def place_market_buy(self, symbol, funds):
+            StubHtxClient.calls += 1
+            return {"status": "ok", "data": "order-1"}
+
+        def order(self, order_id):
+            return {
+                "status": "ok",
+                "data": {
+                    "id": order_id,
+                    "state": "filled",
+                    "field-amount": "0.0003",
+                    "field-cash-amount": "1.4",
+                    "field-fees": "0.0000006",
+                },
+            }
+
+    monkeypatch.setattr(app_module, "create_htx_client", lambda *args, **kwargs: StubHtxClient())
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    client = make_client_with_coinsenda(tmp_path, AcceptedUsdtCoinsendaClient())
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 5000}).json()
+    client.post(f"/orders/{order['external_id']}/payment-request", json={"currency": "usdt", "sell_price_cop_per_usdt": 3500})
+    client.post(f"/orders/{order['external_id']}/reconcile-payment")
+
+    first = client.post(f"/orders/{order['external_id']}/xaut-execute-market-buy?confirm=EXECUTE_HTX_XAUT_BUY")
+    second = client.post(f"/orders/{order['external_id']}/xaut-execute-market-buy?confirm=EXECUTE_HTX_XAUT_BUY")
+
+    assert first.status_code == 200
+    assert first.json()["status"] == "settled"
+    assert first.json()["user_summary"]["gold_grams_net"] == "0.009312380953"
+    assert second.status_code == 200
+    assert second.json()["status"] == "already_settled"
+    assert second.json()["idempotent"] is True
+    assert StubHtxClient.calls == 1
+
+
+def test_settle_xaut_reconciles_then_executes(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class AcceptedUsdtCoinsendaClient(AcceptedCoinsendaClient):
+        def check_payment_request(self, order):
+            from chaut_api.coinsenda import PaymentRequestStatus
+
+            return PaymentRequestStatus(
+                payment_status="payment_confirmed",
+                raw={
+                    "event_type": "payment_confirmed",
+                    "payment_request": {
+                        "id": order.payment_request_id,
+                        "state": "accepted",
+                        "external_id": order.external_id,
+                        "amount": str(order.payment_amount),
+                        "currency": "usdt",
+                    },
+                },
+            )
+
+    class StubHtxClient:
+        def get_xaut_ticker(self):
+            return {"category": "spot", "symbol": "xautusdt", "bestAsk": "4700", "price": "4700", "raw": {"status": "ok"}}
+
+        def get_xaut_instrument(self):
+            return {"category": "spot", "symbol": "xautusdt", "min-order-value": 1, "raw": {"status": "ok"}}
+
+    class StubHtxPrivateClient:
+        def place_market_buy(self, symbol, funds):
+            return {"status": "ok", "data": "order-1"}
+
+        def order(self, order_id):
+            return {"status": "ok", "data": {"id": order_id, "state": "filled", "field-amount": "0.0003", "field-cash-amount": "1.4", "field-fees": "0.0000006"}}
+
+    monkeypatch.setattr(app_module, "create_htx_client", lambda *args, **kwargs: StubHtxClient())
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    client = make_client_with_coinsenda(tmp_path, AcceptedUsdtCoinsendaClient())
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 5000}).json()
+    client.post(f"/orders/{order['external_id']}/payment-request", json={"currency": "usdt", "sell_price_cop_per_usdt": 3500})
+
+    response = client.post(f"/orders/{order['external_id']}/settle-xaut?confirm=EXECUTE_HTX_XAUT_BUY")
+
+    assert response.status_code == 200
+    assert response.json()["payment_status"] == "confirmed"
+    assert response.json()["status"] == "settled"
+    assert response.json()["user_summary"]["message"].startswith("Compra completada")
