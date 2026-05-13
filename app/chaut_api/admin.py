@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from html import escape
 
 from fastapi import HTTPException, Request
@@ -147,12 +148,12 @@ def admin_order_detail(store: OrderStore, external_id: str, token: str | None = 
         <p class="muted">Monto</p>
         <div class="metric">{order.amount_cop_gross:,.0f} COP</div>
         <p><b>USDT:</b> {order.payment_amount or 0}</p>
-        <p><b>Creada:</b> {escape(order.created_at)}</p>
+        <p><b>Creada:</b> {format_bogota_time(order.created_at)}</p>
       </div>
     </div>
     <h2>Timeline de eventos</h2>
     <div class="table-wrap"><table><tr><th>Fecha</th><th>Tipo</th><th>Payload</th></tr>
-    {''.join(f'<tr><td>{escape(event.created_at)}</td><td><code>{escape(event.event_type)}</code></td><td><pre>{escape(str(event.payload))}</pre></td></tr>' for event in events)}
+    {''.join(f'<tr><td>{format_bogota_time(event.created_at)}</td><td><code>{escape(event.event_type)}</code></td><td><pre>{escape(str(event.payload))}</pre></td></tr>' for event in events)}
     </table></div>
     """
     return render_admin("Detalle Orden", body, token)
@@ -177,7 +178,7 @@ def admin_account_detail(store: OrderStore, customer_id: str, token: str | None 
         raise HTTPException(status_code=404, detail="Account not found")
     portfolio = store.get_portfolio(customer_id)
     entries = "".join(
-        f"<tr><td>{escape(entry.created_at)}</td><td><a href='/admin/orders/{escape(entry.external_id)}{_token_qs(token)}'><code>{escape(entry.external_id)}</code></a></td><td>{entry.cop_gross:,.0f}</td><td>{entry.usdt_spent:.12f}</td><td>{entry.amount:.18f}</td><td>{entry.gold_grams:.12f}</td></tr>"
+        f"<tr><td>{format_bogota_time(entry.created_at)}</td><td><a href='/admin/orders/{escape(entry.external_id)}{_token_qs(token)}'><code>{escape(entry.external_id)}</code></a></td><td>{entry.cop_gross:,.0f}</td><td>{entry.usdt_spent:.12f}</td><td>{entry.amount:.18f}</td><td>{entry.gold_grams:.12f}</td></tr>"
         for entry in portfolio.entries
     )
     identities = "".join(f"<li>{escape(identity.provider)}: <code>{escape(identity.provider_user_id)}</code></li>" for identity in account.identities)
@@ -200,7 +201,7 @@ def orders_table(orders, token: str | None = None, legacy: bool = False) -> str:
         rows.append(
             f"<tr{row_class}><td><a href='/admin/orders/{escape(order.external_id)}{_token_qs(token)}'><code>{escape(order.external_id)}</code></a></td>"
             f"<td><code>{escape(order.customer_id or '-')}</code></td><td>{order.amount_cop_gross:,.0f}</td><td>{order.payment_amount or ''}</td>"
-            f"<td>{status_pill(order.payment_status, order.payment_status == 'confirmed')}</td><td>{conversion_pill(order.conversion_status)}</td><td>{escape(order.created_at)}</td></tr>"
+            f"<td>{status_pill(order.payment_status, order.payment_status == 'confirmed')}</td><td>{conversion_pill(order.conversion_status)}</td><td>{format_bogota_time(order.created_at)}</td></tr>"
         )
     if not rows:
         rows.append("<tr><td colspan='7' class='muted'>Sin registros.</td></tr>")
@@ -222,3 +223,15 @@ def conversion_pill(text: str) -> str:
 
 def _token_qs(token: str | None) -> str:
     return f"?token={escape(token)}" if token else ""
+
+
+def format_bogota_time(value: str) -> str:
+    try:
+        normalized = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local = dt.astimezone(timezone(timedelta(hours=-5)))
+        return escape(local.strftime("%Y-%m-%d %I:%M %p GMT-5"))
+    except Exception:
+        return escape(value)
