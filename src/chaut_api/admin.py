@@ -118,10 +118,13 @@ def admin_dashboard(store: OrderStore, token: str | None = None) -> HTMLResponse
 def admin_orders(store: OrderStore, token: str | None = None) -> HTMLResponse:
     orders = store.list_orders(200)
     active = [order for order in orders if order.conversion_status not in LEGACY_STATES]
+    paid = [order for order in active if order.payment_status == "confirmed"]
+    unpaid = [order for order in active if order.payment_status != "confirmed"]
     legacy = [order for order in orders if order.conversion_status in LEGACY_STATES]
     body = f"""
-    <section class="hero"><div class="grid">{metric_card("Activas", len(active))}{metric_card("Legado", len(legacy))}{metric_card("Total", len(orders))}</div></section>
-    <h2>Ordenes activas</h2>{orders_table(active, token)}
+    <section class="hero"><div class="grid">{metric_card("Pagadas", len(paid))}{metric_card("No pagas", len(unpaid))}{metric_card("Legado", len(legacy))}{metric_card("Total", len(orders))}</div></section>
+    <h2>Pagadas / operables</h2><p class="muted">Ordenes con pago confirmado. Si XAUT dice not_started, falta ejecutar settlement o es una orden anterior a la trazabilidad fina.</p>{orders_table(paid, token)}
+    <h2>No pagas</h2><p class="muted">PaymentRequests creados o pruebas que aun no han confirmado pago; no mueven XAUT ni afectan saldos.</p>{orders_table(unpaid, token, compact=True)}
     <h2>Legado / pruebas</h2>{orders_table(legacy, token, legacy=True)}
     """
     return render_admin("Ordenes", body, token)
@@ -194,13 +197,14 @@ def admin_account_detail(store: OrderStore, customer_id: str, token: str | None 
     return render_admin("Usuario", body, token)
 
 
-def orders_table(orders, token: str | None = None, legacy: bool = False) -> str:
+def orders_table(orders, token: str | None = None, legacy: bool = False, compact: bool = False) -> str:
     rows = []
     for order in orders:
         row_class = " class='legacy'" if legacy else ""
+        customer = "-" if compact else escape(order.customer_id or "-")
         rows.append(
             f"<tr{row_class}><td><a href='/admin/orders/{escape(order.external_id)}{_token_qs(token)}'><code>{escape(order.external_id)}</code></a></td>"
-            f"<td><code>{escape(order.customer_id or '-')}</code></td><td>{order.amount_cop_gross:,.0f}</td><td>{order.payment_amount or ''}</td>"
+            f"<td><code>{customer}</code></td><td>{order.amount_cop_gross:,.0f}</td><td>{order.payment_amount or ''}</td>"
             f"<td>{status_pill(order.payment_status, order.payment_status == 'confirmed')}</td><td>{conversion_pill(order.conversion_status)}</td><td>{format_bogota_time(order.created_at)}</td></tr>"
         )
     if not rows:
