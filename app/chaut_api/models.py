@@ -3,6 +3,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, PositiveFloat, PositiveInt
 
+MIN_ORDER_COP = 5000
+
 
 class AccountIdentityRequest(BaseModel):
     provider: str = Field(default="telegram", min_length=1)
@@ -46,7 +48,7 @@ class AccountResponse(BaseModel):
 class CheckoutRequest(BaseModel):
     client_id: str = Field(min_length=1)
     identity: AccountIdentityRequest | None = None
-    amount_cop: PositiveInt
+    amount_cop: int = Field(ge=MIN_ORDER_COP)
     expiration_minutes: PositiveInt = Field(default=60, le=1440)
     method: str = Field(default="Bre-B")
     max_price_slippage_cop: PositiveFloat = 1.0
@@ -77,7 +79,7 @@ class CheckoutResponse(BaseModel):
 class CreateOrderRequest(BaseModel):
     client_id: str = Field(min_length=1)
     customer_id: str | None = None
-    amount_cop_gross: PositiveInt
+    amount_cop_gross: int = Field(ge=MIN_ORDER_COP)
     estimated_rate_cop_per_usdt: PositiveFloat | None = None
 
 

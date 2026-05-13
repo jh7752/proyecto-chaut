@@ -1,11 +1,17 @@
 from fastapi import FastAPI, HTTPException
 
 from .bybit import create_bybit_client
+from .htx import (
+    create_htx_client,
+    create_htx_private_client,
+    prepare_xaut_market_buy,
+    quote_xaut_from_usdt,
+    summarize_accounts as summarize_htx_accounts,
+    summarize_filled_order,
+)
 from .kucoin import (
     create_kucoin_client,
     create_kucoin_private_client,
-    prepare_xaut_market_buy,
-    quote_xaut_from_usdt,
     summarize_accounts,
 )
 
@@ -108,6 +114,25 @@ def create_app(
     def bybit_xaut_instrument() -> BybitInstrumentResponse:
         return BybitInstrumentResponse(**create_bybit_client(settings.bybit_worker_instance_id, settings.bybit_worker_region).get_xaut_instrument())
 
+
+    @app.get("/htx/health")
+    def htx_health() -> dict:
+        return create_htx_client(settings.htx_base_url, settings.htx_xaut_symbol).health()
+
+    @app.get("/htx/xaut-ticker")
+    def htx_xaut_ticker() -> dict:
+        return create_htx_client(settings.htx_base_url, settings.htx_xaut_symbol).get_xaut_ticker()
+
+    @app.get("/htx/xaut-instrument")
+    def htx_xaut_instrument() -> dict:
+        return create_htx_client(settings.htx_base_url, settings.htx_xaut_symbol).get_xaut_instrument()
+
+    @app.get("/htx/accounts")
+    def htx_accounts() -> dict:
+        client = create_htx_private_client(settings.htx_worker_instance_id, settings.htx_worker_region)
+        payload = client.accounts()
+        return {"source": "htx-worker-ssm" if settings.htx_worker_instance_id else "htx-direct", "accounts": summarize_htx_accounts(payload)}
+
     @app.get("/kucoin/health", response_model=KucoinHealthResponse)
     def kucoin_health() -> KucoinHealthResponse:
         return KucoinHealthResponse(**create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol).health())
@@ -141,30 +166,37 @@ def create_app(
             raise HTTPException(status_code=409, detail="Order payment is not confirmed")
         if order.payment_currency != "usdt" or order.payment_amount is None:
             raise HTTPException(status_code=409, detail="Order does not have confirmed USDT amount")
-        public = create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol)
+        public = create_htx_client(settings.htx_base_url, settings.htx_xaut_symbol)
         ticker = public.get_xaut_ticker()
         instrument = public.get_xaut_instrument()
-        prepared = prepare_xaut_market_buy(
-            order.payment_amount,
-            float(ticker["bestAsk"] or ticker["price"]),
-            order.fee_percent,
-            instrument.get("baseIncrement") or "0.0001",
-            instrument.get("minFunds") or "0.1",
-            settings.kucoin_xaut_symbol,
-        )
+        try:
+            prepared = prepare_xaut_market_buy(
+                order.payment_amount,
+                float(ticker["bestAsk"] or ticker["price"]),
+                order.fee_percent,
+                instrument,
+                settings.htx_xaut_symbol,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         payload = {"external_id": order.external_id, "customer_id": order.customer_id, "ticker": ticker, "instrument": instrument, **prepared}
         store.add_event(order.external_id, "xaut.order_prepared", payload)
         return payload
 
     @app.post("/orders/{external_id}/xaut-execute-market-buy")
     def execute_xaut_market_buy(external_id: str, confirm: str = "") -> dict:
-        if confirm != "EXECUTE_TEST_BUY":
-            raise HTTPException(status_code=409, detail="Missing explicit EXECUTE_TEST_BUY confirmation")
+        if confirm != "EXECUTE_HTX_XAUT_BUY":
+            raise HTTPException(status_code=409, detail="Missing explicit EXECUTE_HTX_XAUT_BUY confirmation")
         prepared = prepare_xaut_order(external_id)
-        client = create_kucoin_private_client(settings.kucoin_worker_instance_id, settings.kucoin_worker_region)
+        client = create_htx_private_client(settings.htx_worker_instance_id, settings.htx_worker_region)
         result = client.place_market_buy(prepared["symbol"], prepared["funds"])
-        payload = {"external_id": external_id, "prepared": prepared, "kucoin": result}
+        order_id = str(result.get("data"))
+        order_detail = client.order(order_id)
+        fill = summarize_filled_order(order_detail)
+        payload = {"external_id": external_id, "prepared": prepared, "htx": result, "order": fill}
         store.add_event(external_id, "xaut.order_submitted", payload)
+        if fill["state"] == "filled":
+            store.add_event(external_id, "xaut.order_filled", payload)
         return payload
 
     @app.post("/checkout", response_model=CheckoutResponse)
@@ -334,14 +366,14 @@ def create_app(
         if order.payment_currency != "usdt" or order.payment_amount is None:
             raise HTTPException(status_code=409, detail="Order does not have confirmed USDT amount")
 
-        ticker = create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol).get_xaut_ticker()
+        ticker = create_htx_client(settings.htx_base_url, settings.htx_xaut_symbol).get_xaut_ticker()
         ask_price = float(ticker["bestAsk"] or ticker["price"])
         quote = quote_xaut_from_usdt(order.payment_amount, ask_price, order.fee_percent)
         payload = {
             "external_id": order.external_id,
             "customer_id": order.customer_id,
             "payment_status": order.payment_status,
-            "source": "kucoin_public_ticker",
+            "source": "htx_public_ticker",
             "ticker": ticker,
             **quote,
         }

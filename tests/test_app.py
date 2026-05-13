@@ -33,6 +33,12 @@ def test_create_order_calculates_fee_and_persists(tmp_path) -> None:
     assert get_response.json() == body
 
 
+def test_create_order_rejects_amount_below_5000_cop(tmp_path) -> None:
+    client = make_client(tmp_path)
+    response = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 4999})
+    assert response.status_code == 422
+
+
 def test_create_order_calculates_usdt_estimate(tmp_path) -> None:
     client = make_client(tmp_path)
     response = client.post(
@@ -267,6 +273,12 @@ def test_checkout_orchestrates_order_payment_request_and_instructions(monkeypatc
         "payment_request.created",
         "payment_instructions.inspected",
     ]
+
+
+def test_checkout_rejects_amount_below_5000_cop(tmp_path) -> None:
+    client = make_client(tmp_path)
+    response = client.post("/checkout", json={"client_id": "cli-test", "amount_cop": 4999})
+    assert response.status_code == 422
 
 
 class SlippageCoinsendaClient(AcceptedCoinsendaClient):
@@ -513,6 +525,43 @@ def test_kucoin_public_endpoints(monkeypatch, tmp_path) -> None:
     assert client.get("/kucoin/xaut-instrument").json()["baseCurrency"] == "XAUT"
 
 
+def test_htx_public_endpoints(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class StubHtxClient:
+        def health(self):
+            return {"status": "ok", "source": "htx", "symbol": "xautusdt"}
+
+        def get_xaut_ticker(self):
+            return {
+                "category": "spot",
+                "symbol": "xautusdt",
+                "price": "4710.47",
+                "bestBid": "4710.47",
+                "bestAsk": "4710.48",
+                "raw": {"status": "ok"},
+            }
+
+        def get_xaut_instrument(self):
+            return {
+                "category": "spot",
+                "symbol": "xautusdt",
+                "base-currency": "xaut",
+                "quote-currency": "usdt",
+                "min-order-value": 1,
+                "min-order-amt": 0.00001,
+                "api-trading": "enabled",
+                "raw": {"symbol": "xautusdt"},
+            }
+
+    monkeypatch.setattr(app_module, "create_htx_client", lambda *args, **kwargs: StubHtxClient())
+    client = make_client(tmp_path)
+
+    assert client.get("/htx/health").json() == {"status": "ok", "source": "htx", "symbol": "xautusdt"}
+    assert client.get("/htx/xaut-ticker").json()["bestAsk"] == "4710.48"
+    assert client.get("/htx/xaut-instrument").json()["base-currency"] == "xaut"
+
+
 def test_xaut_quote_requires_confirmed_payment(monkeypatch, tmp_path) -> None:
     import chaut_api.app as app_module
 
@@ -520,13 +569,13 @@ def test_xaut_quote_requires_confirmed_payment(monkeypatch, tmp_path) -> None:
         def get_xaut_ticker(self):
             return {
                 "category": "spot",
-                "symbol": "XAUT-USDT",
+                "symbol": "xautusdt",
                 "bestAsk": "4692.8",
                 "price": "4692.0",
-                "raw": {"code": "200000"},
+                "raw": {"status": "ok"},
             }
 
-    monkeypatch.setattr(app_module, "create_kucoin_client", lambda *args, **kwargs: StubKucoinClient())
+    monkeypatch.setattr(app_module, "create_htx_client", lambda *args, **kwargs: StubKucoinClient())
     client = make_client_with_coinsenda(tmp_path, AcceptedCoinsendaClient())
     order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 5000}).json()
 
@@ -560,15 +609,15 @@ def test_xaut_quote_applies_fee_before_user_grams(monkeypatch, tmp_path) -> None
         def get_xaut_ticker(self):
             return {
                 "category": "spot",
-                "symbol": "XAUT-USDT",
+                "symbol": "xautusdt",
                 "bestAsk": "4692.8",
                 "price": "4692.0",
-                "raw": {"code": "200000"},
+                "raw": {"status": "ok"},
             }
 
-    monkeypatch.setattr(app_module, "create_kucoin_client", lambda *args, **kwargs: StubKucoinClient())
+    monkeypatch.setattr(app_module, "create_htx_client", lambda *args, **kwargs: StubKucoinClient())
     client = make_client_with_coinsenda(tmp_path, AcceptedUsdtCoinsendaClient())
-    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 2000}).json()
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 5000}).json()
     client.post(
         f"/orders/{order['external_id']}/payment-request",
         json={"currency": "usdt", "sell_price_cop_per_usdt": 3527.49},
@@ -580,7 +629,7 @@ def test_xaut_quote_applies_fee_before_user_grams(monkeypatch, tmp_path) -> None
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "quoted"
-    assert body["confirmed_usdt"] == 0.566975
+    assert body["confirmed_usdt"] == 1.417438
     assert body["xaut_ask_price"] == 4692.8
     assert body["fee_percent"] == 0.5
     assert body["xaut_gross"] > body["xaut_net"]
