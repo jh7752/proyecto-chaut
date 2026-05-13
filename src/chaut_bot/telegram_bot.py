@@ -9,6 +9,7 @@ TOKEN = os.environ["CHAUT_TELEGRAM_BOT_TOKEN"]
 API_BASE = os.environ.get("CHAUT_API_BASE", "http://api:8000").rstrip("/")
 TG_BASE = f"https://api.telegram.org/bot{TOKEN}"
 MIN_COP = 5000
+PENDING_NAMES: dict[int, bool] = {}
 
 
 def main() -> None:
@@ -31,14 +32,17 @@ def handle_update(update: dict[str, Any]) -> None:
     message = update.get("message") or {}
     text = (message.get("text") or "").strip()
     chat_id = message.get("chat", {}).get("id")
+    user = message.get("from", {})
     if not chat_id:
         return
-    if text.startswith("/ahorros"):
-        send_savings_menu(chat_id)
+    if PENDING_NAMES.get(chat_id) and text and not text.startswith("/"):
+        register_name(chat_id, user, text)
+    elif text.startswith(("/start", "/ahorros")):
+        ensure_account_then_menu(chat_id, user)
     elif text.startswith("/saldo"):
-        send_balance(chat_id, message.get("from", {}))
+        send_balance(chat_id, user)
     elif text.startswith("/movimientos"):
-        send_movements(chat_id, message.get("from", {}))
+        send_movements(chat_id, user)
     elif text.startswith("/estado"):
         parts = text.split(maxsplit=1)
         if len(parts) == 2:
@@ -46,9 +50,14 @@ def handle_update(update: dict[str, Any]) -> None:
         else:
             send_text(chat_id, "Enviame /estado chaut-... para revisar una orden especifica.")
     elif text.isdigit() and int(text) >= MIN_COP:
-        create_checkout(chat_id, message.get("from", {}), int(text))
+        if not account_exists(user.get("id", chat_id)):
+            ask_name(chat_id)
+        else:
+            create_checkout(chat_id, user, int(text))
+    elif text.lower() in {"hola", "buenas", "hello", "hi"}:
+        ensure_account_then_menu(chat_id, user)
     else:
-        send_text(chat_id, "Usa /ahorros para comprar oro digital o /saldo para ver tu cuenta.")
+        send_text(chat_id, "Hola. Soy tu bot de ahorros en oro digital. Usa /ahorros para empezar o /saldo para ver tu cuenta.")
 
 
 def handle_callback(callback: dict[str, Any]) -> None:
@@ -61,12 +70,16 @@ def handle_callback(callback: dict[str, Any]) -> None:
         tg("answerCallbackQuery", {"callback_query_id": callback_id})
     if not chat_id:
         return
-    if data == "ahorros:5000":
+    if data == "register":
+        ask_name(chat_id)
+    elif data.startswith("ahorros:") and not account_exists(user.get("id", chat_id)):
+        ask_name(chat_id)
+    elif data == "ahorros:5000":
         create_checkout(chat_id, user, 5000)
     elif data == "ahorros:10000":
         create_checkout(chat_id, user, 10000)
     elif data == "ahorros:custom":
-        send_text(chat_id, "Escribeme el monto en COP, minimo 5000. Ejemplo: 25000")
+        send_text(chat_id, "Cuanto quieres ahorrar en COP? Minimo 5000. Ejemplo: 25000")
     elif data.startswith("paid:"):
         settle_order(chat_id, data.split(":", 1)[1])
     elif data == "saldo":
@@ -75,12 +88,54 @@ def handle_callback(callback: dict[str, Any]) -> None:
         send_movements(chat_id, user)
 
 
+def ensure_account_then_menu(chat_id: int, user: dict[str, Any]) -> None:
+    if account_exists(user.get("id", chat_id)):
+        send_savings_menu(chat_id)
+    else:
+        send_text(
+            chat_id,
+            "Hola. Antes de abrir tu cuenta de ahorro en oro digital, dime como te llamas.",
+            buttons=[[{"text": "Registrar mi nombre", "callback_data": "register"}]],
+        )
+        PENDING_NAMES[chat_id] = True
+
+
+def ask_name(chat_id: int) -> None:
+    PENDING_NAMES[chat_id] = True
+    send_text(chat_id, "Como te llamas? Escribe tu nombre y apellido. Ejemplo: Pepito Perez")
+
+
+def register_name(chat_id: int, user: dict[str, Any], display_name: str) -> None:
+    clean_name = " ".join(display_name.split())
+    if len(clean_name) < 3:
+        send_text(chat_id, "Escribeme tu nombre un poco mas completo, por favor.")
+        return
+    api("POST", "/accounts/identify", identity(chat_id, user, clean_name))
+    PENDING_NAMES.pop(chat_id, None)
+    send_text(
+        chat_id,
+        f"Listo, {clean_name}. Tu cuenta quedo creada. Que quieres hacer?",
+        buttons=[
+            [{"text": "Ahorrar 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "Ahorrar 10.000 COP", "callback_data": "ahorros:10000"}],
+            [{"text": "Otra cantidad", "callback_data": "ahorros:custom"}, {"text": "Ver saldo", "callback_data": "saldo"}],
+        ],
+    )
+
+
+def account_exists(provider_user_id: Any) -> bool:
+    try:
+        api("GET", f"/accounts/by-identity/telegram/{provider_user_id}")
+        return True
+    except Exception:
+        return False
+
+
 def send_savings_menu(chat_id: int) -> None:
     send_text(
         chat_id,
-        "Cuanto quieres ahorrar en oro digital?",
+        "Que quieres hacer hoy?",
         buttons=[
-            [{"text": "5.000 COP", "callback_data": "ahorros:5000"}, {"text": "10.000 COP", "callback_data": "ahorros:10000"}],
+            [{"text": "Ahorrar 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "Ahorrar 10.000 COP", "callback_data": "ahorros:10000"}],
             [{"text": "Otra cantidad", "callback_data": "ahorros:custom"}, {"text": "Ver saldo", "callback_data": "saldo"}],
         ],
     )
@@ -91,9 +146,10 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
         send_text(chat_id, "El minimo para ahorrar es 5.000 COP.")
         return
     send_text(chat_id, "Dame un momento, estoy creando tu orden y buscando la llave Bre-B para pagar.")
+    account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
     payload = {
         "client_id": f"telegram:{user.get('id', chat_id)}",
-        "identity": identity(chat_id, user),
+        "identity": identity(chat_id, user, account.get("display_name")),
         "amount_cop": amount_cop,
         "method": "Bre-B",
         "expiration_minutes": 60,
@@ -129,6 +185,9 @@ def settle_order(chat_id: int, external_id: str) -> None:
 
 
 def send_balance(chat_id: int, user: dict[str, Any]) -> None:
+    if not account_exists(user.get("id", chat_id)):
+        ask_name(chat_id)
+        return
     try:
         portfolio = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}/portfolio")
     except Exception:
@@ -146,6 +205,9 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
 
 
 def send_movements(chat_id: int, user: dict[str, Any]) -> None:
+    if not account_exists(user.get("id", chat_id)):
+        ask_name(chat_id)
+        return
     try:
         portfolio = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}/portfolio")
     except Exception:
@@ -166,15 +228,16 @@ def send_order_status(chat_id: int, external_id: str) -> None:
     send_text(chat_id, f"Orden {external_id}\nPago: {order['payment_status']}\nXAUT: {order['conversion_status']}\nCOP: {order['amount_cop_gross']:,.0f}")
 
 
-def identity(chat_id: int, user: dict[str, Any]) -> dict[str, Any]:
+def identity(chat_id: int, user: dict[str, Any], display_name: str | None = None) -> dict[str, Any]:
     first = user.get("first_name") or ""
     last = user.get("last_name") or ""
+    name = display_name or (first + " " + last).strip() or user.get("username") or str(chat_id)
     return {
         "provider": "telegram",
         "provider_user_id": str(user.get("id", chat_id)),
         "chat_id": str(chat_id),
         "username": user.get("username"),
-        "display_name": (first + " " + last).strip() or user.get("username") or str(chat_id),
+        "display_name": name,
         "first_name": first or None,
         "last_name": last or None,
     }
