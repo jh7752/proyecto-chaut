@@ -202,7 +202,7 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
         return
     send_text(
         chat_id,
-        "Tu saldo en OD (oro digital):\n\n"
+        "Tu saldo:\n\n"
         f"{portfolio['gold_grams_net']:.12f} gramos de OD (oro digital)\n"
         f"COP invertido: {portfolio['cop_invested']:,.0f}\n"
         f"Movimientos: {portfolio['entries_count']}",
