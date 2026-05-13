@@ -184,6 +184,7 @@ def settle_order(chat_id: int, external_id: str) -> None:
     message = summary.get("message") or "Compra procesada. Usa /saldo para ver tu cuenta."
     if "(" in message and "XAUT" in message:
         message = message.split("(", 1)[0].strip()
+    message = message.replace("gramos de oro digital", "gramos de OD (oro digital)")
     if confirmed:
         message = message + f"\nUSDT confirmado usado: {confirmed}"
     send_text(chat_id, message)
@@ -201,8 +202,8 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
         return
     send_text(
         chat_id,
-        "Tu saldo en oro digital:\n\n"
-        f"{portfolio['gold_grams_net']:.12f} gramos\n"
+        "Tu saldo en OD (oro digital):\n\n"
+        f"{portfolio['gold_grams_net']:.12f} gramos de OD (oro digital)\n"
         f"COP invertido: {portfolio['cop_invested']:,.0f}\n"
         f"Movimientos: {portfolio['entries_count']}",
         buttons=[[{"text": "Ahorrar mas", "callback_data": "ahorros:5000"}, {"text": "Movimientos", "callback_data": "movimientos"}]],
@@ -225,7 +226,7 @@ def send_movements(chat_id: int, user: dict[str, Any]) -> None:
         return
     lines = ["Ultimos movimientos:"]
     for entry in entries:
-        lines.append(f"- {entry['external_id']}: {entry['gold_grams']:.12f} g / {entry['cop_gross']:,.0f} COP")
+        lines.append(f"- {entry['external_id']}: {entry['gold_grams']:.12f} g OD / {entry['cop_gross']:,.0f} COP")
     send_text(chat_id, "\n".join(lines))
 
 
