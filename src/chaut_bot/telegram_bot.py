@@ -90,6 +90,7 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
     if amount_cop < MIN_COP:
         send_text(chat_id, "El minimo para ahorrar es 5.000 COP.")
         return
+    send_text(chat_id, "Dame un momento, estoy creando tu orden y buscando la llave Bre-B para pagar.")
     payload = {
         "client_id": f"telegram:{user.get('id', chat_id)}",
         "identity": identity(chat_id, user),
