@@ -37,6 +37,7 @@ from .models import (
     InspectPaymentRequestRequest,
     EventResponse,
     OrderResponse,
+    PortfolioResponse,
     PaymentInstructionsResponse,
     XautQuoteResponse,
     build_order,
@@ -101,6 +102,21 @@ def create_app(
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
         return account
+
+
+    @app.get("/accounts/{customer_id}/portfolio", response_model=PortfolioResponse)
+    def get_account_portfolio(customer_id: str) -> PortfolioResponse:
+        account = store.get_account(customer_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        return store.get_portfolio(customer_id)
+
+    @app.get("/accounts/by-identity/{provider}/{provider_user_id}/portfolio", response_model=PortfolioResponse)
+    def get_account_portfolio_by_identity(provider: str, provider_user_id: str) -> PortfolioResponse:
+        account = store.get_account_by_identity(provider, provider_user_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        return store.get_portfolio(account.customer_id)
 
     @app.get("/bybit/health", response_model=BybitHealthResponse)
     def bybit_health() -> BybitHealthResponse:
@@ -175,14 +191,21 @@ def create_app(
         }
 
     def run_xaut_market_buy(external_id: str) -> dict:
+        order = store.get_order(external_id)
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
         already_filled = existing_filled_xaut_event(external_id)
+        existing_ledger = store.get_ledger_entry_for_order(external_id)
         if already_filled is not None:
             fill = already_filled.get("order", {})
+            if existing_ledger is None and order.customer_id:
+                existing_ledger = store.create_ledger_entry(order, fill, already_filled)
             return {
                 "external_id": external_id,
                 "status": "already_settled",
                 "idempotent": True,
                 "order": fill,
+                "ledger_entry": existing_ledger.model_dump() if existing_ledger else None,
                 "user_summary": build_xaut_user_summary(external_id, fill),
                 "original": already_filled,
             }
@@ -196,11 +219,17 @@ def create_app(
         payload = {"external_id": external_id, "prepared": prepared, "htx": result, "order": fill}
         store.update_conversion_status(external_id, "submitted")
         store.add_event(external_id, "xaut.order_submitted", payload)
+        ledger_entry = None
         if fill["state"] == "filled":
             store.update_conversion_status(external_id, "settled")
+            if order.customer_id:
+                ledger_entry = store.create_ledger_entry(order, fill, payload)
+                payload["ledger_entry"] = ledger_entry.model_dump()
             store.add_event(external_id, "xaut.order_filled", payload)
         payload["status"] = "settled" if fill["state"] == "filled" else "submitted"
         payload["idempotent"] = False
+        if ledger_entry:
+            payload["ledger_entry"] = ledger_entry.model_dump()
         payload["user_summary"] = build_xaut_user_summary(external_id, fill)
         return payload
 

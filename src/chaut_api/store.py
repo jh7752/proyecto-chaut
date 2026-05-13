@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
 
-from .models import AccountIdentityRequest, AccountIdentityResponse, AccountResponse, EventResponse, OrderResponse
+from .models import AccountIdentityRequest, AccountIdentityResponse, AccountResponse, EventResponse, LedgerEntryResponse, OrderResponse, PortfolioResponse
 
 
 class OrderStore(Protocol):
@@ -27,6 +27,9 @@ class OrderStore(Protocol):
     ) -> OrderResponse | None: ...
     def update_payment_status(self, external_id: str, payment_status: str) -> OrderResponse | None: ...
     def update_conversion_status(self, external_id: str, conversion_status: str) -> OrderResponse | None: ...
+    def create_ledger_entry(self, order: OrderResponse, fill: dict, payload: dict) -> LedgerEntryResponse: ...
+    def get_ledger_entry_for_order(self, external_id: str) -> LedgerEntryResponse | None: ...
+    def get_portfolio(self, customer_id: str) -> PortfolioResponse: ...
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse: ...
     def list_events(self, entity_id: str) -> list[EventResponse]: ...
 
@@ -108,6 +111,26 @@ class SqliteOrderStore:
 
                 CREATE INDEX IF NOT EXISTS idx_events_entity_id_created_at
                     ON events(entity_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS ledger_entries (
+                    entry_id TEXT PRIMARY KEY,
+                    customer_id TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    entry_type TEXT NOT NULL,
+                    asset TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    gold_grams REAL NOT NULL,
+                    usdt_spent REAL NOT NULL,
+                    cop_gross REAL NOT NULL,
+                    exchange_order_id TEXT,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(external_id, entry_type),
+                    FOREIGN KEY (customer_id) REFERENCES accounts(customer_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_ledger_entries_customer_created_at
+                    ON ledger_entries(customer_id, created_at);
                 """
             )
             self._ensure_order_columns(conn)
@@ -345,6 +368,82 @@ class SqliteOrderStore:
             )
         return self.get_order(external_id)
 
+
+    def create_ledger_entry(self, order: OrderResponse, fill: dict, payload: dict) -> LedgerEntryResponse:
+        if not order.customer_id:
+            raise ValueError("Order must have customer_id to create ledger entry")
+        now = datetime.now(UTC).isoformat()
+        entry = LedgerEntryResponse(
+            entry_id=f"led-{uuid4().hex[:12]}",
+            customer_id=order.customer_id,
+            external_id=order.external_id,
+            entry_type="xaut_purchase",
+            asset="xaut",
+            amount=float(fill["xaut_net"]),
+            gold_grams=float(fill["gold_grams_net"]),
+            usdt_spent=float(fill.get("field_cash_amount") or 0),
+            cop_gross=float(order.amount_cop_gross),
+            exchange_order_id=fill.get("order_id"),
+            payload=payload,
+            created_at=now,
+        )
+        with self._connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT * FROM ledger_entries
+                WHERE external_id = ? AND entry_type = ?
+                """,
+                (entry.external_id, entry.entry_type),
+            ).fetchone()
+            if existing is not None:
+                return _ledger_entry_from_row(existing)
+            conn.execute(
+                """
+                INSERT INTO ledger_entries (
+                    entry_id, customer_id, external_id, entry_type, asset, amount, gold_grams,
+                    usdt_spent, cop_gross, exchange_order_id, payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry.entry_id, entry.customer_id, entry.external_id, entry.entry_type,
+                    entry.asset, entry.amount, entry.gold_grams, entry.usdt_spent,
+                    entry.cop_gross, entry.exchange_order_id, json.dumps(entry.payload), entry.created_at,
+                ),
+            )
+        return entry
+
+    def get_ledger_entry_for_order(self, external_id: str) -> LedgerEntryResponse | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM ledger_entries
+                WHERE external_id = ? AND entry_type = 'xaut_purchase'
+                """,
+                (external_id,),
+            ).fetchone()
+        return _ledger_entry_from_row(row) if row is not None else None
+
+    def get_portfolio(self, customer_id: str) -> PortfolioResponse:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM ledger_entries
+                WHERE customer_id = ?
+                ORDER BY created_at ASC
+                """,
+                (customer_id,),
+            ).fetchall()
+        entries = [_ledger_entry_from_row(row) for row in rows]
+        return PortfolioResponse(
+            customer_id=customer_id,
+            xaut_net=round(sum(entry.amount for entry in entries), 18),
+            gold_grams_net=round(sum(entry.gold_grams for entry in entries), 12),
+            usdt_spent=round(sum(entry.usdt_spent for entry in entries), 12),
+            cop_invested=round(sum(entry.cop_gross for entry in entries), 2),
+            entries_count=len(entries),
+            entries=entries,
+        )
+
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse:
         event = EventResponse(
             event_id=f"evt-{uuid4().hex[:12]}",
@@ -396,6 +495,12 @@ def create_store(database_url: str | None) -> OrderStore:
     store = SqliteOrderStore(database_url or "sqlite:///./data/chaut.db")
     store.init_schema()
     return store
+
+
+def _ledger_entry_from_row(row: sqlite3.Row) -> LedgerEntryResponse:
+    data = dict(row)
+    data["payload"] = json.loads(data.pop("payload_json") or "{}")
+    return LedgerEntryResponse(**data)
 
 
 def _identity_from_row(row: sqlite3.Row) -> AccountIdentityResponse:

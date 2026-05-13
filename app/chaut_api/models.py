@@ -205,6 +205,31 @@ class XautQuoteResponse(BaseModel):
     ticker: dict
 
 
+class LedgerEntryResponse(BaseModel):
+    entry_id: str
+    customer_id: str
+    external_id: str
+    entry_type: str
+    asset: str
+    amount: float
+    gold_grams: float
+    usdt_spent: float
+    cop_gross: float
+    exchange_order_id: str | None = None
+    payload: dict = Field(default_factory=dict)
+    created_at: str
+
+
+class PortfolioResponse(BaseModel):
+    customer_id: str
+    xaut_net: float
+    gold_grams_net: float
+    usdt_spent: float
+    cop_invested: float
+    entries_count: int
+    entries: list[LedgerEntryResponse] = Field(default_factory=list)
+
+
 class EventResponse(BaseModel):
     event_id: str
     entity_id: str
