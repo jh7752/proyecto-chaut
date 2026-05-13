@@ -104,8 +104,7 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
         "Listo. Envia exactamente:\n\n"
         f"{checkout.get('pay_amount_cop') or amount_cop} COP\n"
         f"a la llave Bre-B:\n{checkout.get('pay_to')}\n\n"
-        f"Orden: {external_id}\n"
-        f"USDT estimado: {checkout.get('payment_amount')}\n\n"
+        f"Orden: {external_id}\n\n"
         "Cuando pagues, toca el boton para confirmar y comprar el oro."
     )
     send_text(chat_id, text, buttons=[[{"text": "Ya pague", "callback_data": f"paid:{external_id}"}], [{"text": "Ver saldo", "callback_data": "saldo"}]])
@@ -121,7 +120,12 @@ def settle_order(chat_id: int, external_id: str) -> None:
         send_text(chat_id, "Todavia no veo el pago confirmado en Coinsenda. Espera un poco y toca 'Ya pague' otra vez.")
         return
     summary = result.get("user_summary") or {}
-    send_text(chat_id, summary.get("message") or "Compra procesada. Usa /saldo para ver tu cuenta.")
+    order = result.get("order") or {}
+    confirmed = order.get("field_cash_amount")
+    message = summary.get("message") or "Compra procesada. Usa /saldo para ver tu cuenta."
+    if confirmed:
+        message = message + f"\nUSDT confirmado usado: {confirmed}"
+    send_text(chat_id, message)
 
 
 def send_balance(chat_id: int, user: dict[str, Any]) -> None:
