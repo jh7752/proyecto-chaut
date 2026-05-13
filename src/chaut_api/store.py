@@ -26,6 +26,7 @@ class OrderStore(Protocol):
         sell_price_cop_per_usdt: float | None,
     ) -> OrderResponse | None: ...
     def update_payment_status(self, external_id: str, payment_status: str) -> OrderResponse | None: ...
+    def update_conversion_status(self, external_id: str, conversion_status: str) -> OrderResponse | None: ...
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse: ...
     def list_events(self, entity_id: str) -> list[EventResponse]: ...
 
@@ -327,6 +328,20 @@ class SqliteOrderStore:
                 WHERE external_id = ?
                 """,
                 (payment_status, updated_at, external_id),
+            )
+        return self.get_order(external_id)
+
+
+    def update_conversion_status(self, external_id: str, conversion_status: str) -> OrderResponse | None:
+        updated_at = datetime.now(UTC).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE orders
+                SET conversion_status = ?, updated_at = ?
+                WHERE external_id = ?
+                """,
+                (conversion_status, updated_at, external_id),
             )
         return self.get_order(external_id)
 

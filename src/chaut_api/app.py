@@ -194,8 +194,10 @@ def create_app(
         order_detail = client.order(order_id)
         fill = summarize_filled_order(order_detail)
         payload = {"external_id": external_id, "prepared": prepared, "htx": result, "order": fill}
+        store.update_conversion_status(external_id, "submitted")
         store.add_event(external_id, "xaut.order_submitted", payload)
         if fill["state"] == "filled":
+            store.update_conversion_status(external_id, "settled")
             store.add_event(external_id, "xaut.order_filled", payload)
         payload["status"] = "settled" if fill["state"] == "filled" else "submitted"
         payload["idempotent"] = False
@@ -225,6 +227,7 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         payload = {"external_id": order.external_id, "customer_id": order.customer_id, "ticker": ticker, "instrument": instrument, **prepared}
+        store.update_conversion_status(order.external_id, "prepared")
         store.add_event(order.external_id, "xaut.order_prepared", payload)
         return payload
 
@@ -429,6 +432,7 @@ def create_app(
             "ticker": ticker,
             **quote,
         }
+        store.update_conversion_status(order.external_id, "quoted")
         store.add_event(order.external_id, "xaut.quote_created", payload)
         return XautQuoteResponse(**payload)
 
