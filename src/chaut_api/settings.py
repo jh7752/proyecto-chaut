@@ -21,3 +21,4 @@ class Settings(BaseSettings):
     htx_xaut_symbol: str = Field(default="xautusdt")
     htx_worker_instance_id: str | None = Field(default=None)
     htx_worker_region: str = Field(default="ap-south-1")
+    admin_token: str | None = Field(default=None)

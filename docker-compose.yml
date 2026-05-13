@@ -7,6 +7,7 @@ services:
       CHAUT_ENVIRONMENT: dev
       CHAUT_FEE_PERCENT: "0.5"
       CHAUT_DATABASE_URL: sqlite:////data/chaut.db
+      CHAUT_ADMIN_TOKEN: ${CHAUT_ADMIN_TOKEN:-}
       CHAUT_COINSENDA_MODE: script
       CHAUT_COINSENDA_RUNTIME_DIR: /app/vendor/coinsenda
       CHAUT_BYBIT_WORKER_INSTANCE_ID: ${CHAUT_BYBIT_WORKER_INSTANCE_ID:-}

@@ -13,6 +13,8 @@ class OrderStore(Protocol):
     def upsert_account_identity(self, identity: AccountIdentityRequest) -> AccountResponse: ...
     def get_account(self, customer_id: str) -> AccountResponse | None: ...
     def get_account_by_identity(self, provider: str, provider_user_id: str) -> AccountResponse | None: ...
+    def list_orders(self, limit: int = 100) -> list[OrderResponse]: ...
+    def list_accounts(self, limit: int = 100) -> list[AccountResponse]: ...
     def put_order(self, order: OrderResponse) -> None: ...
     def get_order(self, external_id: str) -> OrderResponse | None: ...
     def update_payment_request(
@@ -298,6 +300,19 @@ class SqliteOrderStore:
                     order.updated_at,
                 ),
             )
+
+
+    def list_orders(self, limit: int = 100) -> list[OrderResponse]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM orders
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [OrderResponse(**dict(row)) for row in rows]
 
     def get_order(self, external_id: str) -> OrderResponse | None:
         with self._connect() as conn:

@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 
+from .admin import admin_account_detail, admin_accounts, admin_dashboard, admin_order_detail, admin_orders, require_admin
 from .bybit import create_bybit_client
 from .htx import (
     create_htx_client,
@@ -70,6 +71,32 @@ def create_app(
             "environment": settings.environment,
         }
 
+
+
+    @app.get("/admin")
+    def admin_home(request: Request):
+        require_admin(request, settings.admin_token)
+        return admin_dashboard(store, request.query_params.get("token"))
+
+    @app.get("/admin/orders")
+    def admin_orders_page(request: Request):
+        require_admin(request, settings.admin_token)
+        return admin_orders(store, request.query_params.get("token"))
+
+    @app.get("/admin/orders/{external_id}")
+    def admin_order_page(external_id: str, request: Request):
+        require_admin(request, settings.admin_token)
+        return admin_order_detail(store, external_id, request.query_params.get("token"))
+
+    @app.get("/admin/accounts")
+    def admin_accounts_page(request: Request):
+        require_admin(request, settings.admin_token)
+        return admin_accounts(store, request.query_params.get("token"))
+
+    @app.get("/admin/accounts/{customer_id}")
+    def admin_account_page(customer_id: str, request: Request):
+        require_admin(request, settings.admin_token)
+        return admin_account_detail(store, customer_id, request.query_params.get("token"))
 
     @app.post("/accounts/identify", response_model=AccountResponse)
     def identify_account(payload: AccountIdentityRequest) -> AccountResponse:
