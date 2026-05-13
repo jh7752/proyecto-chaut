@@ -28,5 +28,16 @@ services:
     volumes:
       - chaut_data:/data
 
+  bot:
+    build: .
+    container_name: chaut-bot
+    restart: unless-stopped
+    command: ["python", "-m", "chaut_bot.telegram_bot"]
+    environment:
+      CHAUT_TELEGRAM_BOT_TOKEN: ${CHAUT_TELEGRAM_BOT_TOKEN:-}
+      CHAUT_API_BASE: http://api:8000
+    depends_on:
+      - api
+
 volumes:
   chaut_data:
