@@ -267,6 +267,19 @@ class SqliteOrderStore:
             return None
         return self.get_account(row["customer_id"])
 
+
+    def list_accounts(self, limit: int = 100) -> list[AccountResponse]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT customer_id FROM accounts
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [account for row in rows if (account := self.get_account(row["customer_id"])) is not None]
+
     def put_order(self, order: OrderResponse) -> None:
         with self._connect() as conn:
             conn.execute(
