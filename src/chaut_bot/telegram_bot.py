@@ -38,7 +38,7 @@ def handle_update(update: dict[str, Any]) -> None:
     if PENDING_NAMES.get(chat_id) and text and not text.startswith("/"):
         register_name(chat_id, user, text)
     elif text.startswith("/start"):
-        send_welcome(chat_id)
+        start_onboarding(chat_id)
     elif text.startswith("/ahorros"):
         send_savings_menu(chat_id, "Que gusto tenerte por aqui. Que quieres hacer hoy?")
     elif text.startswith("/saldo"):
@@ -57,7 +57,7 @@ def handle_update(update: dict[str, Any]) -> None:
         else:
             create_checkout(chat_id, user, int(text))
     elif text.lower() in {"hola", "buenas", "hello", "hi"}:
-        send_welcome(chat_id)
+        start_onboarding(chat_id)
     else:
         send_text(chat_id, "Hola. Soy tu bot de ahorros en oro digital. Usa /ahorros para empezar o /saldo para ver tu cuenta.")
 
@@ -93,13 +93,11 @@ def handle_callback(callback: dict[str, Any]) -> None:
         send_movements(chat_id, user)
 
 
-def send_welcome(chat_id: int) -> None:
+def start_onboarding(chat_id: int) -> None:
+    PENDING_NAMES[chat_id] = True
     send_text(
         chat_id,
-        "Hola, que gusto tenerte por aqui. Soy tu bot de ahorros en OD (oro digital).\n\nPuedes empezar cuando quieras, sin afan.",
-        buttons=[
-            [{"text": "Quiero ahorrar", "callback_data": "menu:ahorros"}, {"text": "Ver saldo", "callback_data": "saldo"}],
-        ],
+        "Hola, que gusto tenerte por aqui. Soy tu bot de ahorros en OD (oro digital).\n\nPuedes empezar cuando quieras, sin afan. Como te llamas?",
     )
 
 
