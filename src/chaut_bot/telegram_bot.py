@@ -73,6 +73,7 @@ def handle_callback(callback: dict[str, Any]) -> None:
     if data == "register":
         ask_name(chat_id)
     elif data.startswith("ahorros:") and not account_exists(user.get("id", chat_id)):
+        send_text(chat_id, "Con mucho gusto. Primero dime tu nombre para dejar tu cuenta bien organizada.")
         ask_name(chat_id)
     elif data == "ahorros:5000":
         create_checkout(chat_id, user, 5000)
@@ -90,7 +91,9 @@ def handle_callback(callback: dict[str, Any]) -> None:
 
 def ensure_account_then_menu(chat_id: int, user: dict[str, Any]) -> None:
     if account_exists(user.get("id", chat_id)):
-        send_savings_menu(chat_id)
+        account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
+        name = account.get("display_name") or "de vuelta"
+        send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name}. Que quieres hacer hoy?")
     else:
         send_text(
             chat_id,
@@ -130,10 +133,10 @@ def account_exists(provider_user_id: Any) -> bool:
         return False
 
 
-def send_savings_menu(chat_id: int) -> None:
+def send_savings_menu(chat_id: int, message: str = "Que quieres hacer hoy?") -> None:
     send_text(
         chat_id,
-        "Que quieres hacer hoy?",
+        message,
         buttons=[
             [{"text": "Ahorrar 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "Ahorrar 10.000 COP", "callback_data": "ahorros:10000"}],
             [{"text": "Otra cantidad", "callback_data": "ahorros:custom"}, {"text": "Ver saldo", "callback_data": "saldo"}],
@@ -186,6 +189,7 @@ def settle_order(chat_id: int, external_id: str) -> None:
 
 def send_balance(chat_id: int, user: dict[str, Any]) -> None:
     if not account_exists(user.get("id", chat_id)):
+        send_text(chat_id, "Todavia no tengo tu cuenta por aqui. Vamos a crearla en un momento.")
         ask_name(chat_id)
         return
     try:
@@ -206,6 +210,7 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
 
 def send_movements(chat_id: int, user: dict[str, Any]) -> None:
     if not account_exists(user.get("id", chat_id)):
+        send_text(chat_id, "Todavia no tengo tu cuenta por aqui. Vamos a crearla en un momento.")
         ask_name(chat_id)
         return
     try:
