@@ -94,7 +94,7 @@ def ensure_account_then_menu(chat_id: int, user: dict[str, Any]) -> None:
     else:
         send_text(
             chat_id,
-            "Hola. Antes de abrir tu cuenta de ahorro en oro digital, dime como te llamas.",
+            "Hola, que gusto tenerte por aqui. Para atenderte mejor, dime tu nombre y apellido.",
             buttons=[[{"text": "Registrar mi nombre", "callback_data": "register"}]],
         )
         PENDING_NAMES[chat_id] = True
@@ -102,19 +102,19 @@ def ensure_account_then_menu(chat_id: int, user: dict[str, Any]) -> None:
 
 def ask_name(chat_id: int) -> None:
     PENDING_NAMES[chat_id] = True
-    send_text(chat_id, "Como te llamas? Escribe tu nombre y apellido. Ejemplo: Pepito Perez")
+    send_text(chat_id, "Como te llamas? Escribeme tu nombre y apellido, porfa. Ejemplo: Pepito Perez")
 
 
 def register_name(chat_id: int, user: dict[str, Any], display_name: str) -> None:
     clean_name = " ".join(display_name.split())
     if len(clean_name) < 3:
-        send_text(chat_id, "Escribeme tu nombre un poco mas completo, por favor.")
+        send_text(chat_id, "Me regalas tu nombre un poquito mas completo, porfa?")
         return
     api("POST", "/accounts/identify", identity(chat_id, user, clean_name))
     PENDING_NAMES.pop(chat_id, None)
     send_text(
         chat_id,
-        f"Listo, {clean_name}. Tu cuenta quedo creada. Que quieres hacer?",
+        f"Listo, {clean_name}. Ya te tengo por aqui. Que quieres hacer hoy?",
         buttons=[
             [{"text": "Ahorrar 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "Ahorrar 10.000 COP", "callback_data": "ahorros:10000"}],
             [{"text": "Otra cantidad", "callback_data": "ahorros:custom"}, {"text": "Ver saldo", "callback_data": "saldo"}],
