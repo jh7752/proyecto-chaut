@@ -182,6 +182,8 @@ def settle_order(chat_id: int, external_id: str) -> None:
     order = result.get("order") or {}
     confirmed = order.get("field_cash_amount")
     message = summary.get("message") or "Compra procesada. Usa /saldo para ver tu cuenta."
+    if "(" in message and "XAUT" in message:
+        message = message.split("(", 1)[0].strip()
     if confirmed:
         message = message + f"\nUSDT confirmado usado: {confirmed}"
     send_text(chat_id, message)
@@ -201,7 +203,6 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
         chat_id,
         "Tu saldo en oro digital:\n\n"
         f"{portfolio['gold_grams_net']:.12f} gramos\n"
-        f"{portfolio['xaut_net']:.18f} XAUT neto\n"
         f"COP invertido: {portfolio['cop_invested']:,.0f}\n"
         f"Movimientos: {portfolio['entries_count']}",
         buttons=[[{"text": "Ahorrar mas", "callback_data": "ahorros:5000"}, {"text": "Movimientos", "callback_data": "movimientos"}]],
