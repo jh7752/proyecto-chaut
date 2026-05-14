@@ -123,36 +123,6 @@ class OrderResponse(BaseModel):
     updated_at: str
 
 
-class BybitHealthResponse(BaseModel):
-    status: str
-    source: str
-    symbol: str
-
-
-class BybitTickerResponse(BaseModel):
-    category: str
-    symbol: str
-    lastPrice: str | None = None
-    bid1Price: str | None = None
-    ask1Price: str | None = None
-    highPrice24h: str | None = None
-    lowPrice24h: str | None = None
-    volume24h: str | None = None
-    turnover24h: str | None = None
-    raw: dict
-
-
-class BybitInstrumentResponse(BaseModel):
-    category: str
-    symbol: str
-    baseCoin: str | None = None
-    quoteCoin: str | None = None
-    status: str | None = None
-    lotSizeFilter: dict | None = None
-    priceFilter: dict | None = None
-    raw: dict
-
-
 class KucoinHealthResponse(BaseModel):
     status: str
     source: str

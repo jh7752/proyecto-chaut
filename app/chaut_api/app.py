@@ -1,7 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request
 
 from .admin import admin_account_detail, admin_accounts, admin_dashboard, admin_order_detail, admin_orders, require_admin
-from .bybit import create_bybit_client
 from .htx import (
     create_htx_client,
     create_htx_private_client,
@@ -25,9 +24,6 @@ from .coinsenda import (
 from .models import (
     AccountIdentityRequest,
     AccountResponse,
-    BybitHealthResponse,
-    BybitInstrumentResponse,
-    BybitTickerResponse,
     KucoinHealthResponse,
     KucoinInstrumentResponse,
     KucoinTickerResponse,
@@ -144,19 +140,6 @@ def create_app(
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
         return store.get_portfolio(account.customer_id)
-
-    @app.get("/bybit/health", response_model=BybitHealthResponse)
-    def bybit_health() -> BybitHealthResponse:
-        return BybitHealthResponse(**create_bybit_client(settings.bybit_worker_instance_id, settings.bybit_worker_region).health())
-
-    @app.get("/bybit/xaut-ticker", response_model=BybitTickerResponse)
-    def bybit_xaut_ticker() -> BybitTickerResponse:
-        return BybitTickerResponse(**create_bybit_client(settings.bybit_worker_instance_id, settings.bybit_worker_region).get_xaut_ticker())
-
-    @app.get("/bybit/xaut-instrument", response_model=BybitInstrumentResponse)
-    def bybit_xaut_instrument() -> BybitInstrumentResponse:
-        return BybitInstrumentResponse(**create_bybit_client(settings.bybit_worker_instance_id, settings.bybit_worker_region).get_xaut_instrument())
-
 
     @app.get("/htx/health")
     def htx_health() -> dict:

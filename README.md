@@ -45,9 +45,6 @@ Endpoints principales:
 - `GET /accounts/{customer_id}` - consulta cuenta interna y sus identidades asociadas.
 - `GET /accounts/by-identity/{provider}/{provider_user_id}` - resuelve una identidad externa a cuenta interna.
 - `GET /health` - estado del servicio.
-- `GET /bybit/health` - prueba conexion publica Bybit para XAUTUSDT.
-- `GET /bybit/xaut-ticker` - precio publico spot XAUTUSDT.
-- `GET /bybit/xaut-instrument` - filtros/precision publica del instrumento spot XAUTUSDT.
 - `GET /kucoin/health` - prueba conexion publica KuCoin para XAUT-USDT.
 - `GET /kucoin/xaut-ticker` - precio publico spot KuCoin XAUT-USDT.
 - `GET /kucoin/xaut-instrument` - filtros/precision publica del instrumento spot KuCoin XAUT-USDT.
@@ -70,7 +67,7 @@ Cuando una orden ya tiene `payment_status=confirmed` y `payment_currency=usdt`, 
 POST /orders/{external_id}/xaut-quote
 ```
 
-La cotizacion usa el `bestAsk` publico de KuCoin `XAUT-USDT`, calcula XAUT bruto, descuenta el fee de Chaut en XAUT y solo entrega al usuario la cifra neta:
+La cotizacion usa HTX como venue principal para `xautusdt`; KuCoin queda como venue secundario/consulta de respaldo. Calcula XAUT bruto, descuenta el fee de Chaut en XAUT y solo entrega al usuario la cifra neta:
 
 ```text
 xaut_gross = confirmed_usdt / ask_price
@@ -81,19 +78,23 @@ gold_grams_net = xaut_net * 31.1034768
 
 Esto no compra XAUT ni mueve fondos. Registra evento `xaut.quote_created`. La liquidacion final requiere ejecucion real en el venue aprobado.
 
-## Bybit Public API
+## Exchange Venues
 
-Primer paso seguro de integracion Bybit: solo endpoints publicos, sin API keys y sin mover fondos.
+HTX es el venue principal para cotizacion y ejecucion XAUT. KuCoin queda como segundo venue/respaldo operativo para consultas y, si se habilita, operaciones secundarias.
 
 ```text
-GET /bybit/health
-GET /bybit/xaut-ticker
-GET /bybit/xaut-instrument
+GET /htx/health
+GET /htx/xaut-ticker
+GET /htx/xaut-instrument
+GET /htx/accounts
+GET /kucoin/health
+GET /kucoin/xaut-ticker
+GET /kucoin/xaut-instrument
+GET /kucoin/accounts
 ```
 
-Los endpoints KuCoin usan API publica spot para `XAUT-USDT`. Estos endpoints sirven para validar disponibilidad, precio publico y filtros del instrumento antes de conectar llaves privadas o ejecutar compras. Bybit queda como integracion legacy/provisional.
+Toda funcion privada con exchanges debe ejecutarse desde el worker de Mumbai por allowlist/IP operativa. No ejecutar llamadas privadas a exchanges directamente desde el core.
 
-La liquidacion final en gramos de oro digital debe esperar conexion privada/operativa con Bybit y ejecucion real o quote operativo confirmado.
 
 ## Account Service MVP
 
@@ -224,13 +225,15 @@ El primer modulo queda concluido como MVP operativo:
 Validacion de precio: `/checkout` compara `pay_amount_cop` contra `amount_cop`. Si el deslizamiento supera `max_price_slippage_cop`, registra `checkout.price_mismatch` y reintenta hasta `max_retries`. Si el ultimo intento sigue fuera de tolerancia, responde `checkout_status=price_mismatch` para no entregar instrucciones como listas.
 
 
-### Bybit Worker SSM Bridge
+### Exchange Worker SSM Bridge
 
-Chaut Core puede usar el worker de Mumbai sin abrir puertos publicos configurando:
+Chaut Core usa el worker de Mumbai sin abrir puertos publicos configurando los worker ids de HTX y KuCoin:
 
 ```text
-CHAUT_BYBIT_WORKER_INSTANCE_ID=i-02a3c86e7d934c601
-CHAUT_BYBIT_WORKER_REGION=ap-south-1
+CHAUT_HTX_WORKER_INSTANCE_ID=i-02a3c86e7d934c601
+CHAUT_HTX_WORKER_REGION=ap-south-1
+CHAUT_KUCOIN_WORKER_INSTANCE_ID=i-02a3c86e7d934c601
+CHAUT_KUCOIN_WORKER_REGION=ap-south-1
 ```
 
-Si esas variables estan presentes, los endpoints Bybit y `xaut-quote` ejecutan la consulta en el worker via SSM. Si no estan presentes, intentan la llamada directa desde el core.
+Si esas variables estan presentes, las funciones privadas de exchange pasan por SSM/Mumbai.
