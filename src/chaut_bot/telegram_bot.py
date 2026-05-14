@@ -75,7 +75,7 @@ def handle_callback(callback: dict[str, Any]) -> None:
     if data == "register":
         ask_name(chat_id)
     elif data == "menu:ahorros":
-        send_savings_menu(chat_id, "Perfecto. Cuanto quieres ahorrar hoy?")
+        send_savings_menu(chat_id, "Cuanto quieres ahorrar hoy en OD?")
     elif data.startswith("ahorros:") and not account_exists(user.get("id", chat_id)):
         send_text(chat_id, "Con mucho gusto. Primero dime tu nombre para dejar tu cuenta bien organizada.")
         ask_name(chat_id)
@@ -84,7 +84,7 @@ def handle_callback(callback: dict[str, Any]) -> None:
     elif data == "ahorros:10000":
         create_checkout(chat_id, user, 10000)
     elif data == "ahorros:custom":
-        send_text(chat_id, "Cuanto quieres ahorrar en COP? Minimo 5000. Ejemplo: 25000")
+        send_text(chat_id, "Cuanto quieres ahorrar en COP? Minimo 5.000. Ejemplo: 25.000")
     elif data.startswith("paid:"):
         settle_order(chat_id, data.split(":", 1)[1])
     elif data == "saldo":
@@ -131,8 +131,8 @@ def register_name(chat_id: int, user: dict[str, Any], display_name: str) -> None
         chat_id,
         f"Listo, {clean_name}. Ya te tengo por aqui. Que quieres hacer hoy?",
         buttons=[
-            [{"text": "Ahorrar 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "Ahorrar 10.000 COP", "callback_data": "ahorros:10000"}],
-            [{"text": "Otra cantidad", "callback_data": "ahorros:custom"}, {"text": "Ver saldo", "callback_data": "saldo"}],
+            [{"text": "🥇 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "🥇 10.000 COP", "callback_data": "ahorros:10000"}],
+            [{"text": "✍️ Otro monto", "callback_data": "ahorros:custom"}, {"text": "📊 Ver saldo", "callback_data": "saldo"}],
         ],
     )
 
@@ -150,8 +150,8 @@ def send_savings_menu(chat_id: int, message: str = "Que quieres hacer hoy?") -> 
         chat_id,
         message,
         buttons=[
-            [{"text": "Ahorrar 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "Ahorrar 10.000 COP", "callback_data": "ahorros:10000"}],
-            [{"text": "Otra cantidad", "callback_data": "ahorros:custom"}, {"text": "Ver saldo", "callback_data": "saldo"}],
+            [{"text": "🥇 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "🥇 10.000 COP", "callback_data": "ahorros:10000"}],
+            [{"text": "✍️ Otro monto", "callback_data": "ahorros:custom"}, {"text": "📊 Ver saldo", "callback_data": "saldo"}],
         ],
     )
 
@@ -178,7 +178,7 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
         f"Orden: {external_id}\n\n"
         "Cuando pagues, toca el boton para confirmar y comprar el oro."
     )
-    send_text(chat_id, text, buttons=[[{"text": "Ya pague", "callback_data": f"paid:{external_id}"}], [{"text": "Ver saldo", "callback_data": "saldo"}]])
+    send_text(chat_id, text, buttons=[[{"text": "✅ Ya pague", "callback_data": f"paid:{external_id}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]])
 
 
 def settle_order(chat_id: int, external_id: str) -> None:
@@ -191,14 +191,10 @@ def settle_order(chat_id: int, external_id: str) -> None:
         send_text(chat_id, "Todavia no veo el pago confirmado en Coinsenda. Espera un poco y toca 'Ya pague' otra vez.")
         return
     summary = result.get("user_summary") or {}
-    order = result.get("order") or {}
-    confirmed = order.get("field_cash_amount")
     message = summary.get("message") or "Compra procesada. Usa /saldo para ver tu cuenta."
     if "(" in message and "XAUT" in message:
         message = message.split("(", 1)[0].strip()
-    message = message.replace("gramos de oro digital", "gramos de OD (oro digital)")
-    if confirmed:
-        message = message + f"\nUSDT confirmado usado: {confirmed}"
+    message = message.replace("gramos de oro digital", "gramos de OD (oro digital) 🥇")
     send_text(chat_id, message)
 
 
@@ -215,10 +211,10 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
     send_text(
         chat_id,
         "Tu saldo:\n\n"
-        f"{portfolio['gold_grams_net']:.12f} gramos de OD (oro digital)\n"
+        f"{portfolio['gold_grams_net']:.12f} gramos de OD (oro digital) 🥇\n"
         f"COP invertido: {portfolio['cop_invested']:,.0f}\n"
         f"Movimientos: {portfolio['entries_count']}",
-        buttons=[[{"text": "Ahorrar mas", "callback_data": "ahorros:5000"}, {"text": "Movimientos", "callback_data": "movimientos"}]],
+        buttons=[[{"text": "🥇 Ahorrar mas", "callback_data": "menu:ahorros"}, {"text": "📜 Movimientos", "callback_data": "movimientos"}]],
     )
 
 
@@ -238,7 +234,7 @@ def send_movements(chat_id: int, user: dict[str, Any]) -> None:
         return
     lines = ["Ultimos movimientos:"]
     for entry in entries:
-        lines.append(f"- {entry['external_id']}: {entry['gold_grams']:.12f} g OD / {entry['cop_gross']:,.0f} COP")
+        lines.append(f"- {entry['external_id']}: {entry['gold_grams']:.12f} g OD 🥇 / {entry['cop_gross']:,.0f} COP")
     send_text(chat_id, "\n".join(lines))
 
 
