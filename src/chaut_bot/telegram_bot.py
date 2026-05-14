@@ -38,9 +38,9 @@ def handle_update(update: dict[str, Any]) -> None:
     if PENDING_NAMES.get(chat_id) and text and not text.startswith("/"):
         register_name(chat_id, user, text)
     elif text.startswith("/start"):
-        start_onboarding(chat_id)
+        welcome_or_onboard(chat_id, user)
     elif text.startswith("/ahorros"):
-        send_savings_menu(chat_id, "Que gusto tenerte por aqui. Que quieres hacer hoy?")
+        welcome_or_onboard(chat_id, user, savings=True)
     elif text.startswith("/saldo"):
         send_balance(chat_id, user)
     elif text.startswith("/movimientos"):
@@ -57,7 +57,7 @@ def handle_update(update: dict[str, Any]) -> None:
         else:
             create_checkout(chat_id, user, int(text))
     elif text.lower() in {"hola", "buenas", "hello", "hi"}:
-        start_onboarding(chat_id)
+        welcome_or_onboard(chat_id, user)
     else:
         send_text(chat_id, "Hola. Soy tu bot de ahorros en oro digital. Usa /ahorros para empezar o /saldo para ver tu cuenta.")
 
@@ -73,7 +73,10 @@ def handle_callback(callback: dict[str, Any]) -> None:
     if not chat_id:
         return
     if data == "register":
-        ask_name(chat_id)
+        if account_exists(user.get("id", chat_id)):
+            welcome_existing_user(chat_id, user)
+        else:
+            ask_name(chat_id)
     elif data == "menu:ahorros":
         send_savings_menu(chat_id, "Cuanto quieres ahorrar hoy en OD?")
     elif data.startswith("ahorros:") and not account_exists(user.get("id", chat_id)):
@@ -93,11 +96,29 @@ def handle_callback(callback: dict[str, Any]) -> None:
         send_movements(chat_id, user)
 
 
+def welcome_or_onboard(chat_id: int, user: dict[str, Any], savings: bool = False) -> None:
+    if account_exists(user.get("id", chat_id)):
+        account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
+        name = account.get("display_name") or "de vuelta"
+        if savings:
+            send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name} 🥇\n\nCuanto quieres ahorrar hoy en OD?")
+        else:
+            send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name} 🥇\n\nQue quieres hacer hoy?")
+        return
+    start_onboarding(chat_id)
+
+
+def welcome_existing_user(chat_id: int, user: dict[str, Any]) -> None:
+    account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
+    name = account.get("display_name") or "de vuelta"
+    send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name} 🥇\n\nQue quieres hacer hoy?")
+
+
 def start_onboarding(chat_id: int) -> None:
     PENDING_NAMES[chat_id] = True
     send_text(
         chat_id,
-        "Hola, que gusto tenerte por aqui. Soy tu bot de ahorros en OD (oro digital).\n\nPuedes empezar cuando quieras, sin afan. Como te llamas?",
+        "Hola, que gusto tenerte por aqui 🥇\n\nSoy tu asistente de ahorro en OD (oro digital).\n\nPara crear tu cuenta, dime tu nombre y apellido.",
     )
 
 
@@ -117,19 +138,23 @@ def ensure_account_then_menu(chat_id: int, user: dict[str, Any]) -> None:
 
 def ask_name(chat_id: int) -> None:
     PENDING_NAMES[chat_id] = True
-    send_text(chat_id, "Como te llamas? Escribeme tu nombre y apellido, porfa. Ejemplo: Pepito Perez")
+    send_text(chat_id, "Escribeme tu nombre y apellido, porfa.\n\nEjemplo: Pepito Perez")
 
 
 def register_name(chat_id: int, user: dict[str, Any], display_name: str) -> None:
+    if account_exists(user.get("id", chat_id)):
+        PENDING_NAMES.pop(chat_id, None)
+        welcome_existing_user(chat_id, user)
+        return
     clean_name = " ".join(display_name.split())
     if len(clean_name) < 3:
-        send_text(chat_id, "Me regalas tu nombre un poquito mas completo, porfa?")
+        send_text(chat_id, "Me regalas tu nombre un poquito mas completo, porfa? Nombre y apellido estaria perfecto.")
         return
     api("POST", "/accounts/identify", identity(chat_id, user, clean_name))
     PENDING_NAMES.pop(chat_id, None)
     send_text(
         chat_id,
-        f"Listo, {clean_name}. Ya te tengo por aqui. Que quieres hacer hoy?",
+        f"Listo, {clean_name} 🥇\n\nTu cuenta quedo lista.\n\nQue quieres hacer hoy?",
         buttons=[
             [{"text": "🥇 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "🥇 10.000 COP", "callback_data": "ahorros:10000"}],
             [{"text": "✍️ Otro monto", "callback_data": "ahorros:custom"}, {"text": "📊 Ver saldo", "callback_data": "saldo"}],
