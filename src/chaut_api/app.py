@@ -220,9 +220,18 @@ def create_app(
                 "original": already_filled,
             }
 
-        prepared = prepare_xaut_order(external_id)
+        if not store.try_start_conversion_execution(external_id):
+            current = store.get_order(external_id)
+            status = current.conversion_status if current else order.conversion_status
+            raise HTTPException(status_code=409, detail=f"Order cannot execute with conversion_status={status}")
+
+        prepared = prepare_xaut_order(external_id, update_status=False)
         client = create_htx_private_client(settings.htx_worker_instance_id, settings.htx_worker_region)
-        result = client.place_market_buy(prepared["symbol"], prepared["funds"])
+        try:
+            result = client.place_market_buy(prepared["symbol"], prepared["funds"])
+        except Exception:
+            store.update_conversion_status(external_id, "prepared")
+            raise
         order_id = str(result.get("data"))
         order_detail = client.order(order_id)
         fill = summarize_filled_order(order_detail)
@@ -244,7 +253,7 @@ def create_app(
         return payload
 
     @app.post("/orders/{external_id}/xaut-prepare-order")
-    def prepare_xaut_order(external_id: str) -> dict:
+    def prepare_xaut_order(external_id: str, update_status: bool = True) -> dict:
         order = store.get_order(external_id)
         if order is None:
             raise HTTPException(status_code=404, detail="Order not found")
@@ -266,7 +275,8 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         payload = {"external_id": order.external_id, "customer_id": order.customer_id, "ticker": ticker, "instrument": instrument, **prepared}
-        store.update_conversion_status(order.external_id, "prepared")
+        if update_status:
+            store.update_conversion_status(order.external_id, "prepared")
         store.add_event(order.external_id, "xaut.order_prepared", payload)
         return payload
 

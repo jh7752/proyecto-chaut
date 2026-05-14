@@ -10,6 +10,7 @@ API_BASE = os.environ.get("CHAUT_API_BASE", "http://api:8000").rstrip("/")
 TG_BASE = f"https://api.telegram.org/bot{TOKEN}"
 MIN_COP = 5000
 PENDING_NAMES: dict[int, bool] = {}
+PENDING_SETTLEMENTS: set[str] = set()
 
 
 def main() -> None:
@@ -207,11 +208,18 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
 
 
 def settle_order(chat_id: int, external_id: str) -> None:
+    if external_id in PENDING_SETTLEMENTS:
+        send_text(chat_id, "Ya estoy revisando ese pago. Dame un momento, por favor.")
+        return
+    PENDING_SETTLEMENTS.add(external_id)
+    send_text(chat_id, "Verificando tu pago. Dame un momento, por favor...")
     try:
         result = api("POST", f"/orders/{external_id}/settle-xaut?confirm=EXECUTE_HTX_XAUT_BUY")
     except Exception as exc:
-        send_text(chat_id, f"Todavia no pude confirmar esa orden. Intenta de nuevo en un momento.\n\nDetalle: {exc}")
+        send_text(chat_id, f"Todavia no pude confirmar esa orden. Intenta de nuevo en un momento.\n\nDetalle: {friendly_api_error(exc)}")
         return
+    finally:
+        PENDING_SETTLEMENTS.discard(external_id)
     if not result.get("executed") and result.get("status") == "payment_not_confirmed":
         send_text(chat_id, "Todavia no veo el pago confirmado en Coinsenda. Espera un poco y toca 'Ya pague' otra vez.")
         return
@@ -281,6 +289,17 @@ def identity(chat_id: int, user: dict[str, Any], display_name: str | None = None
         "first_name": first or None,
         "last_name": last or None,
     }
+
+
+def friendly_api_error(exc: Exception) -> str:
+    text = str(exc)
+    if "conversion_status=executing" in text:
+        return "Tu compra ya esta en proceso. Espera un momento, por favor."
+    if "conversion_status=settled" in text:
+        return "Esta orden ya fue procesada. Usa /saldo para ver tu cuenta."
+    if "balance is not enough" in text or "balance-insufficient" in text:
+        return "El pago fue confirmado, pero estamos completando la compra de oro. Intenta de nuevo en un momento."
+    return text
 
 
 def api(method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:

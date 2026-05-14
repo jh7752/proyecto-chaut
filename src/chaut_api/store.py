@@ -29,6 +29,7 @@ class OrderStore(Protocol):
     ) -> OrderResponse | None: ...
     def update_payment_status(self, external_id: str, payment_status: str) -> OrderResponse | None: ...
     def update_conversion_status(self, external_id: str, conversion_status: str) -> OrderResponse | None: ...
+    def try_start_conversion_execution(self, external_id: str) -> bool: ...
     def create_ledger_entry(self, order: OrderResponse, fill: dict, payload: dict) -> LedgerEntryResponse: ...
     def get_ledger_entry_for_order(self, external_id: str) -> LedgerEntryResponse | None: ...
     def get_portfolio(self, customer_id: str) -> PortfolioResponse: ...
@@ -398,6 +399,22 @@ class SqliteOrderStore:
                 (conversion_status, updated_at, external_id),
             )
         return self.get_order(external_id)
+
+
+    def try_start_conversion_execution(self, external_id: str) -> bool:
+        updated_at = datetime.now(UTC).isoformat()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE orders
+                SET conversion_status = 'executing', updated_at = ?
+                WHERE external_id = ?
+                  AND payment_status = 'confirmed'
+                  AND conversion_status NOT IN ('executing', 'submitted', 'settled')
+                """,
+                (updated_at, external_id),
+            )
+            return cursor.rowcount == 1
 
 
     def create_ledger_entry(self, order: OrderResponse, fill: dict, payload: dict) -> LedgerEntryResponse:
