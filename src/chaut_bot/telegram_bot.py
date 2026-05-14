@@ -253,7 +253,7 @@ def send_movements(chat_id: int, user: dict[str, Any]) -> None:
     except Exception:
         send_text(chat_id, "Aun no tienes movimientos.")
         return
-    entries = portfolio.get("entries", [])[-5:]
+    entries = list(reversed(portfolio.get("entries", [])))[:5]
     if not entries:
         send_text(chat_id, "Aun no tienes movimientos.")
         return

@@ -202,14 +202,22 @@ def orders_table(orders, token: str | None = None, legacy: bool = False, compact
     for order in orders:
         row_class = " class='legacy'" if legacy else ""
         customer = "-" if compact else escape(order.customer_id or "-")
+        filled_time = _order_filled_time(order)
+        main_date = filled_time or order.updated_at or order.created_at
+        date_label = "Compra" if filled_time else "Actualizada" if order.updated_at else "Creada"
         rows.append(
             f"<tr{row_class}><td><a href='/admin/orders/{escape(order.external_id)}{_token_qs(token)}'><code>{escape(order.external_id)}</code></a></td>"
             f"<td><code>{customer}</code></td><td>{order.amount_cop_gross:,.0f}</td><td>{order.payment_amount or ''}</td>"
-            f"<td>{status_pill(order.payment_status, order.payment_status == 'confirmed')}</td><td>{conversion_pill(order.conversion_status)}</td><td>{format_bogota_time(order.created_at)}</td></tr>"
+            f"<td>{status_pill(order.payment_status, order.payment_status == 'confirmed')}</td><td>{conversion_pill(order.conversion_status)}</td>"
+            f"<td>{escape(date_label)}: {format_bogota_time(main_date)}<br><span class='muted'>Creada: {format_bogota_time(order.created_at)}</span></td></tr>"
         )
     if not rows:
         rows.append("<tr><td colspan='7' class='muted'>Sin registros.</td></tr>")
-    return "<div class='table-wrap'><table><tr><th>Orden</th><th>Usuario</th><th>COP</th><th>USDT</th><th>Pago</th><th>XAUT</th><th>Fecha</th></tr>" + "".join(rows) + "</table></div>"
+    return "<div class='table-wrap'><table><tr><th>Orden</th><th>Usuario</th><th>COP</th><th>USDT</th><th>Pago</th><th>XAUT</th><th>Fecha operativa</th></tr>" + "".join(rows) + "</table></div>"
+
+
+def _order_filled_time(order) -> str | None:
+    return getattr(order, "ledger_entry_created_at", None)
 
 
 def metric_card(label: str, value) -> str:

@@ -121,6 +121,7 @@ class OrderResponse(BaseModel):
     conversion_status: str
     created_at: str
     updated_at: str
+    ledger_entry_created_at: str | None = None
 
 
 class KucoinHealthResponse(BaseModel):

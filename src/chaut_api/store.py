@@ -319,8 +319,11 @@ class SqliteOrderStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT * FROM orders
-                ORDER BY created_at DESC
+                SELECT orders.*, ledger_entries.created_at AS ledger_entry_created_at FROM orders
+                LEFT JOIN ledger_entries
+                  ON ledger_entries.external_id = orders.external_id
+                 AND ledger_entries.entry_type = 'xaut_purchase'
+                ORDER BY COALESCE(ledger_entries.created_at, orders.updated_at, orders.created_at) DESC
                 LIMIT ?
                 """,
                 (limit,),
