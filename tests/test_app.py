@@ -776,7 +776,10 @@ def test_portfolio_tracks_user_ledger_after_settlement(monkeypatch, tmp_path) ->
     assert settlement["ledger_entry"]["customer_id"] == checkout["customer_id"]
     assert portfolio["customer_id"] == checkout["customer_id"]
     assert portfolio["entries_count"] == 1
-    assert portfolio["xaut_net"] == 0.0002994
-    assert portfolio["gold_grams_net"] == 0.009312380953
+    assert portfolio["xaut_net"] == 0.000281768398798842
+    assert portfolio["gold_grams_net"] == 0.008763976854
+    allocation = portfolio["entries"][0]["payload"]["allocation"]
+    assert allocation["chaut_spread_xaut"] == 1.7631601201158e-05
+    assert allocation["spread_profit_cop_estimated"] > 0
     assert portfolio["cop_invested"] == 5000.0
     assert portfolio["entries"][0]["external_id"] == checkout["external_id"]

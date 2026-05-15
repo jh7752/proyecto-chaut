@@ -70,6 +70,10 @@ class CheckoutResponse(BaseModel):
     payment_currency: str
     payment_amount: float | None
     sell_price_cop_per_usdt: float
+    reference_rate_cop_per_usdt: float | None = None
+    reference_rate_source: str | None = None
+    reference_rate_date: str | None = None
+    spread_profit_cop_estimated: float | None = None
     payment_request_id: str | None
     payment_url: str | None
     instructions: dict
@@ -81,6 +85,9 @@ class CreateOrderRequest(BaseModel):
     customer_id: str | None = None
     amount_cop_gross: int = Field(ge=MIN_ORDER_COP)
     estimated_rate_cop_per_usdt: PositiveFloat | None = None
+    reference_rate_cop_per_usdt: PositiveFloat | None = None
+    reference_rate_source: str | None = None
+    reference_rate_date: str | None = None
 
 
 class CreatePaymentRequestRequest(BaseModel):
@@ -113,6 +120,10 @@ class OrderResponse(BaseModel):
     payment_currency: str = "cop"
     payment_amount: float | None = None
     sell_price_cop_per_usdt: float | None = None
+    reference_rate_cop_per_usdt: float | None = None
+    reference_rate_source: str | None = None
+    reference_rate_date: str | None = None
+    spread_profit_cop_estimated: float | None = None
     estimated_rate_cop_per_usdt: float | None = None
     estimated_usdt: float | None = None
     payment_request_id: str | None = None

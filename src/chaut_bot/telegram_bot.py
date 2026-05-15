@@ -10,6 +10,7 @@ API_BASE = os.environ.get("CHAUT_API_BASE", "http://api:8000").rstrip("/")
 TG_BASE = f"https://api.telegram.org/bot{TOKEN}"
 MIN_COP = 5000
 PENDING_NAMES: dict[int, bool] = {}
+PENDING_CUSTOM_AMOUNTS: set[int] = set()
 PENDING_SETTLEMENTS: set[str] = set()
 
 
@@ -38,6 +39,8 @@ def handle_update(update: dict[str, Any]) -> None:
         return
     if PENDING_NAMES.get(chat_id) and text and not text.startswith("/"):
         register_name(chat_id, user, text)
+    elif PENDING_CUSTOM_AMOUNTS.__contains__(chat_id) and text and not text.startswith("/"):
+        handle_custom_amount(chat_id, user, text)
     elif text.startswith("/start"):
         welcome_or_onboard(chat_id, user)
     elif text.startswith("/ahorros"):
@@ -88,6 +91,7 @@ def handle_callback(callback: dict[str, Any]) -> None:
     elif data == "ahorros:10000":
         create_checkout(chat_id, user, 10000)
     elif data == "ahorros:custom":
+        PENDING_CUSTOM_AMOUNTS.add(chat_id)
         send_text(chat_id, "Cuanto quieres ahorrar en COP? Minimo 5.000. Ejemplo: 25.000")
     elif data.startswith("paid:"):
         settle_order(chat_id, data.split(":", 1)[1])
@@ -95,6 +99,32 @@ def handle_callback(callback: dict[str, Any]) -> None:
         send_balance(chat_id, user)
     elif data == "movimientos":
         send_movements(chat_id, user)
+
+
+def handle_custom_amount(chat_id: int, user: dict[str, Any], text: str) -> None:
+    amount = parse_cop_input(text)
+    if amount is None:
+        send_text(chat_id, "No pude leer ese monto. Escribelo asi, porfa: 25.000")
+        return
+    if amount < MIN_COP:
+        send_text(chat_id, "El minimo para ahorrar es 5.000 COP. Escribe otro monto, porfa.")
+        return
+    PENDING_CUSTOM_AMOUNTS.discard(chat_id)
+    if not account_exists(user.get("id", chat_id)):
+        send_text(chat_id, "Con mucho gusto. Primero dime tu nombre para dejar tu cuenta bien organizada.")
+        ask_name(chat_id)
+        return
+    create_checkout(chat_id, user, amount)
+
+
+def parse_cop_input(text: str) -> int | None:
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if not digits:
+        return None
+    try:
+        return int(digits)
+    except ValueError:
+        return None
 
 
 def welcome_or_onboard(chat_id: int, user: dict[str, Any], savings: bool = False) -> None:

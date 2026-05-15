@@ -63,6 +63,10 @@ class SqliteOrderStore:
                     payment_currency TEXT NOT NULL DEFAULT 'cop',
                     payment_amount REAL,
                     sell_price_cop_per_usdt REAL,
+                    reference_rate_cop_per_usdt REAL,
+                    reference_rate_source TEXT,
+                    reference_rate_date TEXT,
+                    spread_profit_cop_estimated REAL,
                     estimated_rate_cop_per_usdt REAL,
                     estimated_usdt REAL,
                     payment_request_id TEXT,
@@ -146,6 +150,10 @@ class SqliteOrderStore:
             "payment_currency": "ALTER TABLE orders ADD COLUMN payment_currency TEXT NOT NULL DEFAULT 'cop'",
             "payment_amount": "ALTER TABLE orders ADD COLUMN payment_amount REAL",
             "sell_price_cop_per_usdt": "ALTER TABLE orders ADD COLUMN sell_price_cop_per_usdt REAL",
+            "reference_rate_cop_per_usdt": "ALTER TABLE orders ADD COLUMN reference_rate_cop_per_usdt REAL",
+            "reference_rate_source": "ALTER TABLE orders ADD COLUMN reference_rate_source TEXT",
+            "reference_rate_date": "ALTER TABLE orders ADD COLUMN reference_rate_date TEXT",
+            "spread_profit_cop_estimated": "ALTER TABLE orders ADD COLUMN spread_profit_cop_estimated REAL",
             "estimated_rate_cop_per_usdt": "ALTER TABLE orders ADD COLUMN estimated_rate_cop_per_usdt REAL",
             "estimated_usdt": "ALTER TABLE orders ADD COLUMN estimated_usdt REAL",
             "payment_request_id": "ALTER TABLE orders ADD COLUMN payment_request_id TEXT",
@@ -288,9 +296,10 @@ class SqliteOrderStore:
                 INSERT INTO orders (
                     external_id, client_id, customer_id, amount_cop_gross, fee_percent, fee_asset, fee_cop,
                     amount_cop_net, payment_currency, payment_amount, sell_price_cop_per_usdt,
+                    reference_rate_cop_per_usdt, reference_rate_source, reference_rate_date, spread_profit_cop_estimated,
                     estimated_rate_cop_per_usdt, estimated_usdt, payment_request_id, payment_url,
                     payment_status, conversion_status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order.external_id,
@@ -304,6 +313,10 @@ class SqliteOrderStore:
                     order.payment_currency,
                     order.payment_amount,
                     order.sell_price_cop_per_usdt,
+                    order.reference_rate_cop_per_usdt,
+                    order.reference_rate_source,
+                    order.reference_rate_date,
+                    order.spread_profit_cop_estimated,
                     order.estimated_rate_cop_per_usdt,
                     order.estimated_usdt,
                     order.payment_request_id,
@@ -348,6 +361,10 @@ class SqliteOrderStore:
         payment_currency: str,
         payment_amount: float,
         sell_price_cop_per_usdt: float | None,
+        reference_rate_cop_per_usdt: float | None = None,
+        reference_rate_source: str | None = None,
+        reference_rate_date: str | None = None,
+        spread_profit_cop_estimated: float | None = None,
     ) -> OrderResponse | None:
         updated_at = datetime.now(UTC).isoformat()
         with self._connect() as conn:
@@ -356,7 +373,8 @@ class SqliteOrderStore:
                 UPDATE orders
                 SET payment_request_id = ?, payment_url = ?, payment_status = ?,
                     payment_currency = ?, payment_amount = ?, sell_price_cop_per_usdt = ?,
-                    updated_at = ?
+                    reference_rate_cop_per_usdt = ?, reference_rate_source = ?, reference_rate_date = ?,
+                    spread_profit_cop_estimated = ?, updated_at = ?
                 WHERE external_id = ?
                 """,
                 (
@@ -366,6 +384,10 @@ class SqliteOrderStore:
                     payment_currency,
                     payment_amount,
                     sell_price_cop_per_usdt,
+                    reference_rate_cop_per_usdt,
+                    reference_rate_source,
+                    reference_rate_date,
+                    spread_profit_cop_estimated,
                     updated_at,
                     external_id,
                 ),
@@ -421,15 +443,17 @@ class SqliteOrderStore:
         if not order.customer_id:
             raise ValueError("Order must have customer_id to create ledger entry")
         now = datetime.now(UTC).isoformat()
+        allocation = _allocate_client_xaut(order, fill)
+        payload = {**payload, "allocation": allocation}
         entry = LedgerEntryResponse(
             entry_id=f"led-{uuid4().hex[:12]}",
             customer_id=order.customer_id,
             external_id=order.external_id,
             entry_type="xaut_purchase",
             asset="xaut",
-            amount=float(fill["xaut_net"]),
-            gold_grams=float(fill["gold_grams_net"]),
-            usdt_spent=float(fill.get("field_cash_amount") or 0),
+            amount=allocation["client_xaut_net"],
+            gold_grams=allocation["client_gold_grams_net"],
+            usdt_spent=float(fill.get("field_cash_amount") or order.payment_amount or 0),
             cop_gross=float(order.amount_cop_gross),
             exchange_order_id=fill.get("order_id"),
             payload=payload,
@@ -543,6 +567,43 @@ def create_store(database_url: str | None) -> OrderStore:
     store = SqliteOrderStore(database_url or "sqlite:///./data/chaut.db")
     store.init_schema()
     return store
+
+
+def _allocate_client_xaut(order: OrderResponse, fill: dict) -> dict:
+    total_xaut = float(fill["xaut_net"])
+    total_grams = float(fill["gold_grams_net"])
+    execution_usdt = float(fill.get("field_cash_amount") or order.payment_amount or 0)
+    reference_rate = order.reference_rate_cop_per_usdt
+    coinsenda_rate = order.sell_price_cop_per_usdt
+    if not reference_rate or not coinsenda_rate or reference_rate <= 0 or coinsenda_rate <= 0:
+        return {
+            "reference_rate_cop_per_usdt": reference_rate,
+            "coinsenda_rate_cop_per_usdt": coinsenda_rate,
+            "client_ratio": 1.0,
+            "client_xaut_net": total_xaut,
+            "client_gold_grams_net": total_grams,
+            "chaut_spread_xaut": 0.0,
+            "chaut_spread_gold_grams": 0.0,
+            "spread_profit_cop_estimated": order.spread_profit_cop_estimated,
+        }
+    client_usdt_equivalent = float(order.amount_cop_gross) / float(reference_rate)
+    ratio = min(max(client_usdt_equivalent / execution_usdt, 0), 1) if execution_usdt else 1
+    client_xaut = round(total_xaut * ratio, 18)
+    client_grams = round(total_grams * ratio, 12)
+    return {
+        "reference_rate_cop_per_usdt": reference_rate,
+        "reference_rate_source": order.reference_rate_source,
+        "reference_rate_date": order.reference_rate_date,
+        "coinsenda_rate_cop_per_usdt": coinsenda_rate,
+        "execution_usdt": execution_usdt,
+        "client_usdt_equivalent": round(client_usdt_equivalent, 8),
+        "client_ratio": round(ratio, 12),
+        "client_xaut_net": client_xaut,
+        "client_gold_grams_net": client_grams,
+        "chaut_spread_xaut": round(total_xaut - client_xaut, 18),
+        "chaut_spread_gold_grams": round(total_grams - client_grams, 12),
+        "spread_profit_cop_estimated": order.spread_profit_cop_estimated,
+    }
 
 
 def _ledger_entry_from_row(row: sqlite3.Row) -> LedgerEntryResponse:
