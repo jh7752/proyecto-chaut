@@ -45,13 +45,13 @@ def _read_cache() -> dict | None:
 
 
 def _parse_seticap_output(output: str) -> dict:
-    trm_match = re.search(r"TRM:\s*\$\s*([0-9,.]+)", output)
+    close_match = re.search(r"Cierre:\s*\$\s*([0-9,.]+)", output)
     date_match = re.search(r"Fecha:\s*([^\n]+)", output)
-    if not trm_match:
-        raise ValueError("Could not parse Seticap TRM")
-    value = float(trm_match.group(1).replace(",", ""))
+    if not close_match:
+        raise ValueError("Could not parse Seticap close rate")
+    value = float(close_match.group(1).replace(",", ""))
     return {
         "reference_rate": value,
-        "reference_rate_source": "seticap",
+        "reference_rate_source": "seticap-close",
         "reference_rate_date": date_match.group(1).strip() if date_match else None,
     }
