@@ -1,7 +1,24 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from chaut_api import create_app
 from chaut_api.settings import Settings
+
+
+@pytest.fixture(autouse=True)
+def stub_seticap_trm(monkeypatch):
+    import chaut_api.app as app_module
+
+    monkeypatch.setattr(
+        app_module,
+        "get_seticap_trm",
+        lambda: {
+            "reference_rate": 3794.91,
+            "source": "seticap-test",
+            "reference_rate_source": "seticap-test",
+            "reference_rate_date": "2026-05-18",
+        },
+    )
 
 
 def make_client(tmp_path):
