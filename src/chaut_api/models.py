@@ -4,6 +4,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, PositiveFloat, PositiveInt
 
 MIN_ORDER_COP = 5000
+DEFAULT_PAYMENT_EXPIRATION_MINUTES = 45
 
 
 class AccountIdentityRequest(BaseModel):
@@ -49,7 +50,7 @@ class CheckoutRequest(BaseModel):
     client_id: str = Field(min_length=1)
     identity: AccountIdentityRequest | None = None
     amount_cop: int = Field(ge=MIN_ORDER_COP)
-    expiration_minutes: PositiveInt = Field(default=60, le=1440)
+    expiration_minutes: PositiveInt = Field(default=DEFAULT_PAYMENT_EXPIRATION_MINUTES, le=1440)
     method: str = Field(default="Bre-B")
     max_price_slippage_cop: PositiveFloat = 1.0
     max_retries: int = Field(default=1, ge=0, le=3)
@@ -91,7 +92,7 @@ class CreateOrderRequest(BaseModel):
 
 
 class CreatePaymentRequestRequest(BaseModel):
-    expiration_minutes: PositiveInt = Field(default=60, le=1440)
+    expiration_minutes: PositiveInt = Field(default=DEFAULT_PAYMENT_EXPIRATION_MINUTES, le=1440)
     currency: str = Field(default="cop", pattern="^(cop|usdt)$")
     sell_price_cop_per_usdt: PositiveFloat | None = None
 

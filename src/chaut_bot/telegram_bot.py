@@ -9,6 +9,7 @@ TOKEN = os.environ["CHAUT_TELEGRAM_BOT_TOKEN"]
 API_BASE = os.environ.get("CHAUT_API_BASE", "http://api:8000").rstrip("/")
 TG_BASE = f"https://api.telegram.org/bot{TOKEN}"
 MIN_COP = 5000
+PAYMENT_EXPIRATION_MINUTES = 45
 PENDING_NAMES: dict[int, bool] = {}
 PENDING_CUSTOM_AMOUNTS: set[int] = set()
 PENDING_SETTLEMENTS: set[str] = set()
@@ -223,7 +224,7 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
         "identity": identity(chat_id, user, account.get("display_name")),
         "amount_cop": amount_cop,
         "method": "Bre-B",
-        "expiration_minutes": 60,
+        "expiration_minutes": PAYMENT_EXPIRATION_MINUTES,
     }
     checkout = api("POST", "/checkout", payload)
     external_id = checkout["external_id"]
@@ -232,6 +233,7 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
         f"{checkout.get('pay_amount_cop') or amount_cop} COP\n"
         f"a la llave Bre-B:\n{checkout.get('pay_to')}\n\n"
         f"Orden: {external_id}\n\n"
+        f"Esta llave vence en {checkout.get('expires_in_minutes') or PAYMENT_EXPIRATION_MINUTES} minutos.\n\n"
         "Cuando pagues, toca el boton para confirmar y comprar el oro."
     )
     send_text(chat_id, text, buttons=[[{"text": "✅ Ya pague", "callback_data": f"paid:{external_id}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]])

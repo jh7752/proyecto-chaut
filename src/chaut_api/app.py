@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from fastapi import FastAPI, HTTPException, Request
 
 from .admin import admin_account_detail, admin_accounts, admin_dashboard, admin_order_detail, admin_orders, require_admin
@@ -39,6 +41,7 @@ from .models import (
     PaymentInstructionsResponse,
     XautQuoteResponse,
     build_order,
+    DEFAULT_PAYMENT_EXPIRATION_MINUTES,
 )
 from .payment_instructions import extract_payment_instructions, parse_cop_amount
 from .reconciliation import reconcile_payment_status
@@ -49,6 +52,27 @@ from .store import OrderStore, create_store
 def estimate_spread_profit_cop(amount_cop: int | float, sell_price: float, reference_rate: float) -> float:
     confirmed_usdt = float(amount_cop) / float(sell_price)
     return round(max(float(reference_rate) - float(sell_price), 0) * confirmed_usdt, 2)
+
+
+def _parse_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    parsed = datetime.fromisoformat(normalized)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _payment_request_expiration_minutes(events: list[EventResponse]) -> int:
+    for event in events:
+        if event.event_type != "payment_request.created":
+            continue
+        raw = event.payload.get("coinsenda") or {}
+        value = raw.get("expiration_minutes") or event.payload.get("expiration_minutes")
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return DEFAULT_PAYMENT_EXPIRATION_MINUTES
+    return DEFAULT_PAYMENT_EXPIRATION_MINUTES
 
 
 def create_app(
@@ -73,15 +97,60 @@ def create_app(
             "environment": settings.environment,
         }
 
+    def expire_stale_payment_requests(limit: int = 500) -> dict:
+        now = datetime.now(UTC)
+        marked = []
+        for order in store.list_orders(limit):
+            if order.payment_status not in {"draft", "created", "pending"}:
+                continue
+            if not order.payment_request_id or order.conversion_status in {"executing", "submitted", "settled"}:
+                continue
+            events = store.list_events(order.external_id)
+            created_event = next((event for event in events if event.event_type == "payment_request.created"), None)
+            created_at = _parse_dt(created_event.created_at if created_event else order.updated_at or order.created_at)
+            if created_at is None:
+                continue
+            expiration_minutes = _payment_request_expiration_minutes(events)
+            expired_at = created_at + timedelta(minutes=expiration_minutes)
+            if now <= expired_at:
+                continue
+            previous_status = order.payment_status
+            updated = store.update_payment_status(order.external_id, "expired")
+            if updated is None:
+                continue
+            if not any(event.event_type == "payment.expired" for event in events):
+                store.add_event(
+                    order.external_id,
+                    "payment.expired",
+                    {
+                        "reason": "payment_request_expired",
+                        "previous_status": previous_status,
+                        "expiration_minutes": expiration_minutes,
+                        "payment_request_created_at": created_at.isoformat(),
+                        "expired_at": expired_at.isoformat(),
+                        "marked_at": now.isoformat(),
+                        "payment_request_id": order.payment_request_id,
+                    },
+                )
+            marked.append({
+                "external_id": order.external_id,
+                "previous_status": previous_status,
+                "new_status": "expired",
+                "expired_at": expired_at.isoformat(),
+            })
+        return {"marked_count": len(marked), "marked": marked}
+
 
 
     @app.get("/admin")
     def admin_home(request: Request):
+        expire_stale_payment_requests()
         require_admin(request, settings.admin_token)
         return admin_dashboard(store, request.query_params.get("token"))
 
     @app.get("/admin/orders")
     def admin_orders_page(request: Request):
+        expire_stale_payment_requests()
         require_admin(request, settings.admin_token)
         return admin_orders(store, request.query_params.get("token"))
 
@@ -294,6 +363,7 @@ def create_app(
 
     @app.post("/orders/{external_id}/settle-xaut")
     def settle_xaut_after_payment(external_id: str, confirm: str = "") -> dict:
+        expire_stale_payment_requests()
         if confirm != "EXECUTE_HTX_XAUT_BUY":
             raise HTTPException(status_code=409, detail="Missing explicit EXECUTE_HTX_XAUT_BUY confirmation")
         order = reconcile_payment(external_id)
@@ -308,6 +378,10 @@ def create_app(
         result["payment_status"] = order.payment_status
         result["executed"] = not result.get("idempotent", False)
         return result
+
+    @app.post("/orders/expire-stale-payment-requests")
+    def expire_stale_payment_requests_endpoint() -> dict:
+        return expire_stale_payment_requests()
 
     @app.post("/checkout", response_model=CheckoutResponse)
     def checkout(payload: CheckoutRequest) -> CheckoutResponse:
@@ -602,6 +676,7 @@ def create_app(
 
     @app.post("/orders/{external_id}/reconcile-payment", response_model=OrderResponse)
     def reconcile_payment(external_id: str) -> OrderResponse:
+        expire_stale_payment_requests()
         order = store.get_order(external_id)
         if order is None:
             raise HTTPException(status_code=404, detail="Order not found")
