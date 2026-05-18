@@ -5,7 +5,9 @@ import time
 from pathlib import Path
 
 CACHE_PATH = Path("/tmp/chaut-seticap-trm-cache.json")
-SETICAP_DIR = Path("/app/vendor/seticap-trm")
+CONTAINER_SETICAP_DIR = Path("/app/vendor/seticap-trm")
+REPO_SETICAP_DIR = Path(__file__).resolve().parents[2] / "vendor" / "seticap-trm"
+SETICAP_DIR = CONTAINER_SETICAP_DIR if CONTAINER_SETICAP_DIR.exists() else REPO_SETICAP_DIR
 CACHE_TTL_SECONDS = 3600
 
 
