@@ -64,7 +64,7 @@ def handle_update(update: dict[str, Any]) -> None:
     elif text.lower() in {"hola", "buenas", "hello", "hi"}:
         welcome_or_onboard(chat_id, user)
     else:
-        send_text(chat_id, "Hola. Soy tu bot de ahorros en oro digital. Usa /ahorros para empezar o /saldo para ver tu cuenta.")
+        send_text(chat_id, "Hola. Soy Chaut, tu asistente para comprar oro digital 🥇\n\nUsa /ahorros para empezar o /saldo para ver tu cuenta.")
 
 
 def handle_callback(callback: dict[str, Any]) -> None:
@@ -83,7 +83,7 @@ def handle_callback(callback: dict[str, Any]) -> None:
         else:
             ask_name(chat_id)
     elif data == "menu:ahorros":
-        send_savings_menu(chat_id, "Cuanto quieres ahorrar hoy en OD?")
+        send_savings_menu(chat_id, "Cuanto quieres comprar hoy en oro digital?")
     elif data.startswith("ahorros:") and not account_exists(user.get("id", chat_id)):
         send_text(chat_id, "Con mucho gusto. Primero dime tu nombre para dejar tu cuenta bien organizada.")
         ask_name(chat_id)
@@ -93,7 +93,7 @@ def handle_callback(callback: dict[str, Any]) -> None:
         create_checkout(chat_id, user, 10000)
     elif data == "ahorros:custom":
         PENDING_CUSTOM_AMOUNTS.add(chat_id)
-        send_text(chat_id, "Cuanto quieres ahorrar en COP? Minimo 5.000. Ejemplo: 25.000")
+        send_text(chat_id, "Cuanto quieres comprar?\n\nEscribe el monto en COP. Minimo 5.000. Ejemplo: 25.000")
     elif data.startswith("paid:"):
         settle_order(chat_id, data.split(":", 1)[1])
     elif data == "saldo":
@@ -108,7 +108,7 @@ def handle_custom_amount(chat_id: int, user: dict[str, Any], text: str) -> None:
         send_text(chat_id, "No pude leer ese monto. Escribelo asi, porfa: 25.000")
         return
     if amount < MIN_COP:
-        send_text(chat_id, "El minimo para ahorrar es 5.000 COP. Escribe otro monto, porfa.")
+        send_text(chat_id, "El minimo para comprar oro digital es 5.000 COP. Escribe otro monto, porfa.")
         return
     PENDING_CUSTOM_AMOUNTS.discard(chat_id)
     if not account_exists(user.get("id", chat_id)):
@@ -133,7 +133,7 @@ def welcome_or_onboard(chat_id: int, user: dict[str, Any], savings: bool = False
         account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
         name = account.get("display_name") or "de vuelta"
         if savings:
-            send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name} 🥇\n\nCuanto quieres ahorrar hoy en OD?")
+            send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name} 🥇\n\nCuanto quieres comprar hoy en oro digital?")
         else:
             send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name} 🥇\n\nQue quieres hacer hoy?")
         return
@@ -150,7 +150,7 @@ def start_onboarding(chat_id: int) -> None:
     PENDING_NAMES[chat_id] = True
     send_text(
         chat_id,
-        "Hola, que gusto tenerte por aqui 🥇\n\nSoy tu asistente de ahorro en OD (oro digital).\n\nPara crear tu cuenta, dime tu nombre y apellido.",
+        "Hola, que gusto tenerte por aqui 🥇\n\nSoy Chaut, tu asistente para comprar oro digital.\n\nPara crear tu cuenta, dime tu nombre y apellido.",
     )
 
 
@@ -215,9 +215,9 @@ def send_savings_menu(chat_id: int, message: str = "Que quieres hacer hoy?") -> 
 
 def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None:
     if amount_cop < MIN_COP:
-        send_text(chat_id, "El minimo para ahorrar es 5.000 COP.")
+        send_text(chat_id, "El minimo para comprar oro digital es 5.000 COP.")
         return
-    send_text(chat_id, "Dame un momento, estoy creando tu orden y buscando la llave Bre-B para pagar.")
+    send_text(chat_id, "Dame un momento, estoy generando tu referencia Bre-B.")
     account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
     payload = {
         "client_id": f"telegram:{user.get('id', chat_id)}",
@@ -229,22 +229,23 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
     checkout = api("POST", "/checkout", payload)
     external_id = checkout["external_id"]
     text = (
-        "Listo. Envia exactamente:\n\n"
+        "Listo. Haz la transferencia exacta por Bre-B:\n\n"
+        "Monto: "
         f"{checkout.get('pay_amount_cop') or amount_cop} COP\n"
-        f"a la llave Bre-B:\n{checkout.get('pay_to')}\n\n"
+        f"Llave: {checkout.get('pay_to')}\n\n"
         f"Orden: {external_id}\n\n"
-        f"Esta llave vence en {checkout.get('expires_in_minutes') or PAYMENT_EXPIRATION_MINUTES} minutos.\n\n"
-        "Cuando pagues, toca el boton para confirmar y comprar el oro."
+        f"Esta referencia vence en {checkout.get('expires_in_minutes') or PAYMENT_EXPIRATION_MINUTES} minutos.\n\n"
+        "Cuando termines el pago, toca el boton para validar la transferencia y acreditar tu oro digital."
     )
-    send_text(chat_id, text, buttons=[[{"text": "✅ Ya pague", "callback_data": f"paid:{external_id}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]])
+    send_text(chat_id, text, buttons=[[{"text": "✅ Ya hice el pago", "callback_data": f"paid:{external_id}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]])
 
 
 def settle_order(chat_id: int, external_id: str) -> None:
     if external_id in PENDING_SETTLEMENTS:
-        send_text(chat_id, "Ya estoy revisando ese pago. Dame un momento, por favor.")
+        send_text(chat_id, "Ya estoy validando ese pago. Dame un momento, por favor.")
         return
     PENDING_SETTLEMENTS.add(external_id)
-    send_text(chat_id, "Verificando tu pago. Dame un momento, por favor...")
+    send_text(chat_id, "Validando tu pago. Dame un momento, por favor...")
     try:
         result = api("POST", f"/orders/{external_id}/settle-xaut?confirm=EXECUTE_HTX_XAUT_BUY")
     except Exception as exc:
@@ -253,13 +254,13 @@ def settle_order(chat_id: int, external_id: str) -> None:
     finally:
         PENDING_SETTLEMENTS.discard(external_id)
     if not result.get("executed") and result.get("status") == "payment_not_confirmed":
-        send_text(chat_id, "Todavia no veo el pago confirmado en Coinsenda. Espera un poco y toca 'Ya pague' otra vez.")
+        send_text(chat_id, "Todavia no veo el pago confirmado. Espera un poco y toca 'Ya hice el pago' otra vez.")
         return
     summary = result.get("user_summary") or {}
-    message = summary.get("message") or "Compra procesada. Usa /saldo para ver tu cuenta."
+    message = summary.get("message") or "Compra procesada. Usa /saldo para ver tu oro digital."
     if "(" in message and "XAUT" in message:
         message = message.split("(", 1)[0].strip()
-    message = message.replace("gramos de oro digital", "gramos de OD (oro digital) 🥇")
+    message = message.replace("gramos de oro digital", "gramos de oro digital 🥇")
     send_text(chat_id, message)
 
 
@@ -271,15 +272,22 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
     try:
         portfolio = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}/portfolio")
     except Exception:
-        send_text(chat_id, "Aun no tienes saldo registrado. Usa /ahorros para empezar.")
+        send_text(chat_id, "Aun no tienes oro digital acreditado. Usa /ahorros para empezar.")
         return
+    lines = ["Tu oro digital:"]
+    if portfolio.get("estimated_value_cop") is not None:
+        lines.append(f"Valor estimado hoy: {portfolio['estimated_value_cop']:,.0f} COP")
+    lines.extend(
+        [
+            f"{portfolio['gold_grams_net']:.12f} gramos de oro digital 🥇",
+            f"Dinero invertido: {portfolio['cop_invested']:,.0f} COP",
+            f"Movimientos: {portfolio['entries_count']}",
+        ]
+    )
     send_text(
         chat_id,
-        "Tu saldo:\n\n"
-        f"{portfolio['gold_grams_net']:.12f} gramos de OD (oro digital) 🥇\n"
-        f"COP invertido: {portfolio['cop_invested']:,.0f}\n"
-        f"Movimientos: {portfolio['entries_count']}",
-        buttons=[[{"text": "🥇 Ahorrar mas", "callback_data": "menu:ahorros"}, {"text": "📜 Movimientos", "callback_data": "movimientos"}]],
+        "\n".join(lines),
+        buttons=[[{"text": "🥇 Comprar mas", "callback_data": "menu:ahorros"}, {"text": "📜 Movimientos", "callback_data": "movimientos"}]],
     )
 
 
@@ -299,7 +307,7 @@ def send_movements(chat_id: int, user: dict[str, Any]) -> None:
         return
     lines = ["Ultimos movimientos:"]
     for entry in entries:
-        lines.append(f"- {entry['external_id']}: {entry['gold_grams']:.12f} g OD 🥇 / {entry['cop_gross']:,.0f} COP")
+        lines.append(f"- {entry['external_id']}: {entry['gold_grams']:.12f} g oro digital 🥇 / {entry['cop_gross']:,.0f} COP")
     send_text(chat_id, "\n".join(lines))
 
 
@@ -328,9 +336,9 @@ def friendly_api_error(exc: Exception) -> str:
     if "conversion_status=executing" in text:
         return "Tu compra ya esta en proceso. Espera un momento, por favor."
     if "conversion_status=settled" in text:
-        return "Esta orden ya fue procesada. Usa /saldo para ver tu cuenta."
+        return "Esta orden ya fue procesada. Usa /saldo para ver tu oro digital."
     if "balance is not enough" in text or "balance-insufficient" in text:
-        return "El pago fue confirmado, pero estamos completando la compra de oro. Intenta de nuevo en un momento."
+        return "El pago fue confirmado, pero estamos acreditando tu oro digital. Intenta de nuevo en un momento."
     return text
 
 

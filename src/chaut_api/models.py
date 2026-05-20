@@ -209,6 +209,9 @@ class PortfolioResponse(BaseModel):
     gold_grams_net: float
     usdt_spent: float
     cop_invested: float
+    estimated_value_cop: float | None = None
+    valuation_price_xaut_usdt: float | None = None
+    valuation_rate_cop_per_usdt: float | None = None
     entries_count: int
     entries: list[LedgerEntryResponse] = Field(default_factory=list)
 
