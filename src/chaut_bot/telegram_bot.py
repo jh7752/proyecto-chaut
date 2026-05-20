@@ -287,7 +287,7 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
     send_text(
         chat_id,
         "\n".join(lines),
-        buttons=[[{"text": "🥇 Comprar mas", "callback_data": "menu:ahorros"}, {"text": "📜 Movimientos", "callback_data": "movimientos"}]],
+        buttons=[[{"text": "🥇 Ahorrar más", "callback_data": "menu:ahorros"}, {"text": "📜 Movimientos", "callback_data": "movimientos"}]],
     )
 
 
@@ -305,15 +305,27 @@ def send_movements(chat_id: int, user: dict[str, Any]) -> None:
     if not entries:
         send_text(chat_id, "Aun no tienes movimientos.")
         return
-    lines = ["Ultimos movimientos:"]
+    lines = ["Últimos movimientos:"]
     for entry in entries:
-        lines.append(f"- {entry['external_id']}: {entry['gold_grams']:.12f} g oro digital 🥇 / {entry['cop_gross']:,.0f} COP")
+        movement_date = format_movement_date(entry.get("created_at"))
+        lines.append(f"- {movement_date} · {entry['gold_grams']:.12f} g oro digital 🥇 / {entry['cop_gross']:,.0f} COP")
     send_text(chat_id, "\n".join(lines))
 
 
 def send_order_status(chat_id: int, external_id: str) -> None:
     order = api("GET", f"/orders/{external_id}")
     send_text(chat_id, f"Orden {external_id}\nPago: {order['payment_status']}\nXAUT: {order['conversion_status']}\nCOP: {order['amount_cop_gross']:,.0f}")
+
+
+def format_movement_date(value: str | None) -> str:
+    if not value:
+        return "Movimiento"
+    months = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+    try:
+        month_index = int(value[5:7]) - 1
+        return f"{int(value[8:10])} {months[month_index]}"
+    except (ValueError, IndexError):
+        return "Movimiento"
 
 
 def identity(chat_id: int, user: dict[str, Any], display_name: str | None = None) -> dict[str, Any]:
