@@ -338,7 +338,7 @@ def friendly_api_error(exc: Exception) -> str:
     if "conversion_status=settled" in text:
         return "Esta orden ya fue procesada. Usa /saldo para ver tu oro digital."
     if "balance is not enough" in text or "balance-insufficient" in text:
-        return "El pago fue confirmado, pero estamos acreditando tu oro digital. Intenta de nuevo en un momento."
+        return "El pago fue confirmado. Estamos acreditando tu oro digital. Intenta de nuevo en un momento."
     return text
 
 
