@@ -75,13 +75,16 @@ def _payment_request_expiration_minutes(events: list[EventResponse]) -> int:
     return DEFAULT_PAYMENT_EXPIRATION_MINUTES
 
 
-def _with_estimated_portfolio_value(portfolio: PortfolioResponse, settings: Settings) -> PortfolioResponse:
+def _with_estimated_portfolio_value(
+    portfolio: PortfolioResponse, settings: Settings, coinsenda_client: CoinsendaClient
+) -> PortfolioResponse:
     if portfolio.xaut_net <= 0:
         return portfolio
     try:
         ticker = create_htx_client(settings.htx_base_url, settings.htx_xaut_symbol).get_xaut_ticker()
         xaut_price = float(ticker.get("price") or ticker.get("bestBid") or ticker.get("bestAsk"))
-        cop_per_usdt = get_usdt_cop_sell_price()
+        coinsenda_rate = getattr(coinsenda_client, "get_usdt_cop_sell_price", None)
+        cop_per_usdt = float(coinsenda_rate() if callable(coinsenda_rate) else get_usdt_cop_sell_price())
     except Exception:
         return portfolio
     estimated_value_cop = round(portfolio.xaut_net * xaut_price * cop_per_usdt, 2)
@@ -226,14 +229,14 @@ def create_app(
         account = store.get_account(customer_id)
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
-        return _with_estimated_portfolio_value(store.get_portfolio(customer_id), settings)
+        return _with_estimated_portfolio_value(store.get_portfolio(customer_id), settings, coinsenda_client)
 
     @app.get("/accounts/by-identity/{provider}/{provider_user_id}/portfolio", response_model=PortfolioResponse)
     def get_account_portfolio_by_identity(provider: str, provider_user_id: str) -> PortfolioResponse:
         account = store.get_account_by_identity(provider, provider_user_id)
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
-        return _with_estimated_portfolio_value(store.get_portfolio(account.customer_id), settings)
+        return _with_estimated_portfolio_value(store.get_portfolio(account.customer_id), settings, coinsenda_client)
 
     @app.get("/htx/health")
     def htx_health() -> dict:
