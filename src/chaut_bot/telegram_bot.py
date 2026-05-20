@@ -133,9 +133,9 @@ def welcome_or_onboard(chat_id: int, user: dict[str, Any], savings: bool = False
         account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
         name = account.get("display_name") or "de vuelta"
         if savings:
-            send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name} 🥇\n\nCuanto quieres comprar hoy en oro digital?")
+            send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital? 🥇")
         else:
-            send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name} 🥇\n\nQue quieres hacer hoy?")
+            send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital? 🥇")
         return
     start_onboarding(chat_id)
 
@@ -143,7 +143,7 @@ def welcome_or_onboard(chat_id: int, user: dict[str, Any], savings: bool = False
 def welcome_existing_user(chat_id: int, user: dict[str, Any]) -> None:
     account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
     name = account.get("display_name") or "de vuelta"
-    send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name} 🥇\n\nQue quieres hacer hoy?")
+    send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital? 🥇")
 
 
 def start_onboarding(chat_id: int) -> None:
@@ -158,7 +158,7 @@ def ensure_account_then_menu(chat_id: int, user: dict[str, Any]) -> None:
     if account_exists(user.get("id", chat_id)):
         account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
         name = account.get("display_name") or "de vuelta"
-        send_savings_menu(chat_id, f"Que gusto tenerte de vuelta, {name}. Que quieres hacer hoy?")
+        send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}. ¿Cuánto quieres comprar hoy en oro digital? 🥇")
     else:
         send_text(
             chat_id,
