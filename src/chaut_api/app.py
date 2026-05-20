@@ -75,6 +75,22 @@ def _payment_request_expiration_minutes(events: list[EventResponse]) -> int:
     return DEFAULT_PAYMENT_EXPIRATION_MINUTES
 
 
+def _latest_portfolio_rate(portfolio: PortfolioResponse) -> float | None:
+    for entry in reversed(portfolio.entries):
+        prepared = entry.payload.get("prepared") if isinstance(entry.payload, dict) else None
+        ask_price = prepared.get("ask_price") if isinstance(prepared, dict) else None
+        if ask_price:
+            return float(ask_price)
+    return None
+
+
+def _latest_portfolio_cop_per_usdt(portfolio: PortfolioResponse) -> float | None:
+    for entry in reversed(portfolio.entries):
+        if entry.usdt_spent:
+            return float(entry.cop_gross) / float(entry.usdt_spent)
+    return None
+
+
 def _with_estimated_portfolio_value(
     portfolio: PortfolioResponse, settings: Settings, coinsenda_client: CoinsendaClient
 ) -> PortfolioResponse:
@@ -83,9 +99,14 @@ def _with_estimated_portfolio_value(
     try:
         ticker = create_htx_client(settings.htx_base_url, settings.htx_xaut_symbol).get_xaut_ticker()
         xaut_price = float(ticker.get("price") or ticker.get("bestBid") or ticker.get("bestAsk"))
+    except Exception:
+        xaut_price = _latest_portfolio_rate(portfolio)
+    try:
         coinsenda_rate = getattr(coinsenda_client, "get_usdt_cop_sell_price", None)
         cop_per_usdt = float(coinsenda_rate() if callable(coinsenda_rate) else get_usdt_cop_sell_price())
     except Exception:
+        cop_per_usdt = _latest_portfolio_cop_per_usdt(portfolio)
+    if xaut_price is None or cop_per_usdt is None:
         return portfolio
     estimated_value_cop = round(portfolio.xaut_net * xaut_price * cop_per_usdt, 2)
     return portfolio.model_copy(
