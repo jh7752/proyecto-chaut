@@ -800,3 +800,67 @@ def test_portfolio_tracks_user_ledger_after_settlement(monkeypatch, tmp_path) ->
     assert allocation["spread_profit_cop_estimated"] > 0
     assert portfolio["cop_invested"] == 5000.0
     assert portfolio["entries"][0]["external_id"] == checkout["external_id"]
+
+
+def test_admin_orders_shows_attention_queue(tmp_path) -> None:
+    client = make_client(tmp_path)
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
+    client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60})
+    client.post(f"/orders/{order['external_id']}/payment-request/check")
+
+    response = client.get("/admin/orders")
+
+    assert response.status_code == 200
+    assert "Atencion operativa" in response.text
+    assert "Preparar XAUT" in response.text
+    assert "Marcar atencion" in response.text
+    assert order["external_id"] in response.text
+
+
+def test_admin_mark_attention_records_event(tmp_path) -> None:
+    client = make_client(tmp_path)
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
+
+    response = client.post(f"/admin/orders/{order['external_id']}/mark-attention", follow_redirects=False)
+
+    assert response.status_code == 303
+    events = client.get(f"/orders/{order['external_id']}/events").json()
+    assert events[-1]["event_type"] == "admin.attention_marked"
+
+
+def test_admin_expired_orders_show_expiration_time_not_mark_time(tmp_path) -> None:
+    from chaut_api.admin import order_date_context
+    from chaut_api.app import create_app
+    from chaut_api.settings import Settings
+    from chaut_api.store import create_store
+
+    class PendingCoinsendaClient(AcceptedCoinsendaClient):
+        def check_payment_request(self, order):
+            from chaut_api.coinsenda import PaymentRequestStatus
+
+            return PaymentRequestStatus(payment_status="pending", raw={"payment_request": {"id": order.payment_request_id}})
+
+    client = TestClient(create_app(settings=Settings(database_url=f"sqlite:///{tmp_path / 'test.db'}"), coinsenda_client=PendingCoinsendaClient()))
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
+    client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60})
+    store = create_store(f"sqlite:///{tmp_path / 'test.db'}")
+    stale = store.get_order(order["external_id"])
+    store.add_event(
+        order["external_id"],
+        "payment.expired",
+        {
+            "expired_at": stale.created_at,
+            "marked_at": stale.updated_at,
+            "expiration_minutes": 60,
+        },
+    )
+    store.update_payment_status(order["external_id"], "expired")
+    expired_order = store.get_order(order["external_id"])
+    events = store.list_events(order["external_id"])
+
+    date_label, main_date, secondary_label, secondary_date = order_date_context(expired_order, events)
+
+    assert date_label == "Expira"
+    assert main_date.startswith("2026-")
+    assert secondary_label == "Marcada"
+    assert secondary_date == expired_order.updated_at

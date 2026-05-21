@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 
 from .admin import admin_account_detail, admin_accounts, admin_dashboard, admin_order_detail, admin_orders, require_admin
 from .trm import get_seticap_trm
@@ -201,6 +202,42 @@ def create_app(
     def admin_order_page(external_id: str, request: Request):
         require_admin(request, settings.admin_token)
         return admin_order_detail(store, external_id, request.query_params.get("token"))
+
+    def _admin_redirect(external_id: str, token: str | None, redirect: str = "detail") -> RedirectResponse:
+        path = f"/admin/orders/{external_id}" if redirect == "detail" else "/admin/orders"
+        suffix = f"?token={token}" if token else ""
+        return RedirectResponse(f"{path}{suffix}", status_code=303)
+
+    @app.post("/admin/orders/{external_id}/reconcile")
+    def admin_reconcile_order(external_id: str, request: Request, redirect: str = "detail"):
+        require_admin(request, settings.admin_token)
+        reconcile_payment(external_id)
+        return _admin_redirect(external_id, request.query_params.get("token"), redirect)
+
+    @app.post("/admin/orders/{external_id}/prepare-xaut")
+    def admin_prepare_xaut_order(external_id: str, request: Request, redirect: str = "detail"):
+        require_admin(request, settings.admin_token)
+        prepare_xaut_order(external_id)
+        return _admin_redirect(external_id, request.query_params.get("token"), redirect)
+
+    @app.post("/admin/orders/{external_id}/settle-xaut")
+    def admin_settle_xaut_order(external_id: str, request: Request, confirm: str = "", redirect: str = "detail"):
+        require_admin(request, settings.admin_token)
+        settle_xaut_after_payment(external_id, confirm)
+        return _admin_redirect(external_id, request.query_params.get("token"), redirect)
+
+    @app.post("/admin/orders/{external_id}/mark-attention")
+    def admin_mark_attention_order(external_id: str, request: Request, redirect: str = "detail"):
+        require_admin(request, settings.admin_token)
+        order = store.get_order(external_id)
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
+        store.add_event(
+            external_id,
+            "admin.attention_marked",
+            {"reason": "manual_review", "marked_at": datetime.now(UTC).isoformat()},
+        )
+        return _admin_redirect(external_id, request.query_params.get("token"), redirect)
 
     @app.get("/admin/accounts")
     def admin_accounts_page(request: Request):
