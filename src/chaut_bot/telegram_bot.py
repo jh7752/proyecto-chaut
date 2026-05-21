@@ -83,7 +83,7 @@ def handle_callback(callback: dict[str, Any]) -> None:
         else:
             ask_name(chat_id)
     elif data == "menu:ahorros":
-        send_savings_menu(chat_id, "Cuanto quieres comprar hoy en oro digital?")
+        send_savings_menu(chat_id, "¿Cuánto quieres comprar hoy en oro digital 🥇?")
     elif data.startswith("ahorros:") and not account_exists(user.get("id", chat_id)):
         send_text(chat_id, "Con mucho gusto. Primero dime tu nombre para dejar tu cuenta bien organizada.")
         ask_name(chat_id)
@@ -93,7 +93,7 @@ def handle_callback(callback: dict[str, Any]) -> None:
         create_checkout(chat_id, user, 10000)
     elif data == "ahorros:custom":
         PENDING_CUSTOM_AMOUNTS.add(chat_id)
-        send_text(chat_id, "Cuanto quieres comprar?\n\nEscribe el monto en COP. Minimo 5.000. Ejemplo: 25.000")
+        send_text(chat_id, "¿Cuánto quieres comprar?\n\nEscribe el monto en COP. Mínimo 5.000. Ejemplo: 25.000")
     elif data.startswith("paid:"):
         settle_order(chat_id, data.split(":", 1)[1])
     elif data == "saldo":
@@ -105,10 +105,10 @@ def handle_callback(callback: dict[str, Any]) -> None:
 def handle_custom_amount(chat_id: int, user: dict[str, Any], text: str) -> None:
     amount = parse_cop_input(text)
     if amount is None:
-        send_text(chat_id, "No pude leer ese monto. Escribelo asi, porfa: 25.000")
+        send_text(chat_id, "No pude leer ese monto. Escríbelo así, porfa: 25.000")
         return
     if amount < MIN_COP:
-        send_text(chat_id, "El minimo para comprar oro digital es 5.000 COP. Escribe otro monto, porfa.")
+        send_text(chat_id, "El mínimo para comprar oro digital 🥇 es 5.000 COP. Escribe otro monto, porfa.")
         return
     PENDING_CUSTOM_AMOUNTS.discard(chat_id)
     if not account_exists(user.get("id", chat_id)):
@@ -133,9 +133,9 @@ def welcome_or_onboard(chat_id: int, user: dict[str, Any], savings: bool = False
         account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
         name = account.get("display_name") or "de vuelta"
         if savings:
-            send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital? 🥇")
+            send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital 🥇?")
         else:
-            send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital? 🥇")
+            send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital 🥇?")
         return
     start_onboarding(chat_id)
 
@@ -143,14 +143,14 @@ def welcome_or_onboard(chat_id: int, user: dict[str, Any], savings: bool = False
 def welcome_existing_user(chat_id: int, user: dict[str, Any]) -> None:
     account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
     name = account.get("display_name") or "de vuelta"
-    send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital? 🥇")
+    send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital 🥇?")
 
 
 def start_onboarding(chat_id: int) -> None:
     PENDING_NAMES[chat_id] = True
     send_text(
         chat_id,
-        "Hola, que gusto tenerte por aqui 🥇\n\nSoy Chaut, tu asistente para comprar oro digital.\n\nPara crear tu cuenta, dime tu nombre y apellido.",
+        "Hola, qué gusto tenerte por aquí 🥇\n\nSoy Chaut, tu asistente para comprar oro digital 🥇.\n\nPara crear tu cuenta, dime tu nombre y apellido.",
     )
 
 
@@ -158,11 +158,11 @@ def ensure_account_then_menu(chat_id: int, user: dict[str, Any]) -> None:
     if account_exists(user.get("id", chat_id)):
         account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
         name = account.get("display_name") or "de vuelta"
-        send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}. ¿Cuánto quieres comprar hoy en oro digital? 🥇")
+        send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}. ¿Cuánto quieres comprar hoy en oro digital 🥇?")
     else:
         send_text(
             chat_id,
-            "Hola, que gusto tenerte por aqui. Para atenderte mejor, dime tu nombre y apellido.",
+            "Hola, qué gusto tenerte por aquí. Para atenderte mejor, dime tu nombre y apellido.",
             buttons=[[{"text": "Registrar mi nombre", "callback_data": "register"}]],
         )
         PENDING_NAMES[chat_id] = True
@@ -170,7 +170,7 @@ def ensure_account_then_menu(chat_id: int, user: dict[str, Any]) -> None:
 
 def ask_name(chat_id: int) -> None:
     PENDING_NAMES[chat_id] = True
-    send_text(chat_id, "Escribeme tu nombre y apellido, porfa.\n\nEjemplo: Pepito Perez")
+    send_text(chat_id, "Escríbeme tu nombre y apellido, porfa.\n\nEjemplo: Pepito Pérez")
 
 
 def register_name(chat_id: int, user: dict[str, Any], display_name: str) -> None:
@@ -180,13 +180,13 @@ def register_name(chat_id: int, user: dict[str, Any], display_name: str) -> None
         return
     clean_name = " ".join(display_name.split())
     if len(clean_name) < 3:
-        send_text(chat_id, "Me regalas tu nombre un poquito mas completo, porfa? Nombre y apellido estaria perfecto.")
+        send_text(chat_id, "¿Me regalas tu nombre un poquito más completo, porfa? Nombre y apellido estaría perfecto.")
         return
     api("POST", "/accounts/identify", identity(chat_id, user, clean_name))
     PENDING_NAMES.pop(chat_id, None)
     send_text(
         chat_id,
-        f"Listo, {clean_name} 🥇\n\nTu cuenta quedo lista.\n\nQue quieres hacer hoy?",
+        f"Listo, {clean_name} 🥇\n\nTu cuenta quedó lista.\n\n¿Qué quieres hacer hoy?",
         buttons=[
             [{"text": "🥇 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "🥇 10.000 COP", "callback_data": "ahorros:10000"}],
             [{"text": "✍️ Otro monto", "callback_data": "ahorros:custom"}, {"text": "📊 Ver saldo", "callback_data": "saldo"}],
@@ -202,7 +202,7 @@ def account_exists(provider_user_id: Any) -> bool:
         return False
 
 
-def send_savings_menu(chat_id: int, message: str = "Que quieres hacer hoy?") -> None:
+def send_savings_menu(chat_id: int, message: str = "¿Qué quieres hacer hoy?") -> None:
     send_text(
         chat_id,
         message,
@@ -215,7 +215,7 @@ def send_savings_menu(chat_id: int, message: str = "Que quieres hacer hoy?") -> 
 
 def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None:
     if amount_cop < MIN_COP:
-        send_text(chat_id, "El minimo para comprar oro digital es 5.000 COP.")
+        send_text(chat_id, "El mínimo para comprar oro digital 🥇 es 5.000 COP.")
         return
     send_text(chat_id, "Dame un momento, estoy generando tu referencia Bre-B.")
     account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
@@ -235,7 +235,7 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
         f"Llave: {checkout.get('pay_to')}\n\n"
         f"Orden: {external_id}\n\n"
         f"Esta referencia vence en {checkout.get('expires_in_minutes') or PAYMENT_EXPIRATION_MINUTES} minutos.\n\n"
-        "Cuando termines el pago, toca el boton para validar la transferencia y acreditar tu oro digital."
+        "Cuando termines el pago, toca el botón para validar la transferencia y acreditar tu oro digital 🥇."
     )
     send_text(chat_id, text, buttons=[[{"text": "✅ Ya hice el pago", "callback_data": f"paid:{external_id}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]])
 
@@ -249,15 +249,15 @@ def settle_order(chat_id: int, external_id: str) -> None:
     try:
         result = api("POST", f"/orders/{external_id}/settle-xaut?confirm=EXECUTE_HTX_XAUT_BUY")
     except Exception as exc:
-        send_text(chat_id, f"Todavia no pude confirmar esa orden. Intenta de nuevo en un momento.\n\nDetalle: {friendly_api_error(exc)}")
+        send_text(chat_id, f"Todavía no pude confirmar esa orden. Intenta de nuevo en un momento.\n\nDetalle: {friendly_api_error(exc)}")
         return
     finally:
         PENDING_SETTLEMENTS.discard(external_id)
     if not result.get("executed") and result.get("status") == "payment_not_confirmed":
-        send_text(chat_id, "Todavia no veo el pago confirmado. Espera un poco y toca 'Ya hice el pago' otra vez.")
+        send_text(chat_id, "Todavía no veo el pago confirmado. Espera un poco y toca 'Ya hice el pago' otra vez.")
         return
     summary = result.get("user_summary") or {}
-    message = summary.get("message") or "Compra procesada. Usa /saldo para ver tu oro digital."
+    message = summary.get("message") or "Compra procesada. Usa /saldo para ver tu oro digital 🥇."
     if "(" in message and "XAUT" in message:
         message = message.split("(", 1)[0].strip()
     message = message.replace("gramos de oro digital", "gramos de oro digital 🥇")
@@ -266,21 +266,21 @@ def settle_order(chat_id: int, external_id: str) -> None:
 
 def send_balance(chat_id: int, user: dict[str, Any]) -> None:
     if not account_exists(user.get("id", chat_id)):
-        send_text(chat_id, "Todavia no tengo tu cuenta por aqui. Vamos a crearla en un momento.")
+        send_text(chat_id, "Todavía no tengo tu cuenta por aquí. Vamos a crearla en un momento.")
         ask_name(chat_id)
         return
     try:
         portfolio = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}/portfolio")
     except Exception:
-        send_text(chat_id, "Aun no tienes oro digital acreditado. Usa /ahorros para empezar.")
+        send_text(chat_id, "Aún no tienes oro digital 🥇 acreditado. Usa /ahorros para empezar.")
         return
-    lines = ["Tu oro digital:"]
+    lines = ["Tu oro digital 🥇"]
+    lines.append(f"{portfolio['gold_grams_net']:.12f} g")
     if portfolio.get("estimated_value_cop") is not None:
-        lines.append(f"Valor estimado hoy: {portfolio['estimated_value_cop']:,.0f} COP")
+        lines.append(f"Valor hoy: {portfolio['estimated_value_cop']:,.0f} COP")
     lines.extend(
         [
-            f"{portfolio['gold_grams_net']:.12f} gramos de oro digital 🥇",
-            f"Dinero invertido: {portfolio['cop_invested']:,.0f} COP",
+            f"Invertido: {portfolio['cop_invested']:,.0f} COP",
             f"Movimientos: {portfolio['entries_count']}",
         ]
     )
@@ -293,17 +293,17 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
 
 def send_movements(chat_id: int, user: dict[str, Any]) -> None:
     if not account_exists(user.get("id", chat_id)):
-        send_text(chat_id, "Todavia no tengo tu cuenta por aqui. Vamos a crearla en un momento.")
+        send_text(chat_id, "Todavía no tengo tu cuenta por aquí. Vamos a crearla en un momento.")
         ask_name(chat_id)
         return
     try:
         portfolio = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}/portfolio")
     except Exception:
-        send_text(chat_id, "Aun no tienes movimientos.")
+        send_text(chat_id, "Aún no tienes movimientos.")
         return
     entries = list(reversed(portfolio.get("entries", [])))[:5]
     if not entries:
-        send_text(chat_id, "Aun no tienes movimientos.")
+        send_text(chat_id, "Aún no tienes movimientos.")
         return
     lines = ["Últimos movimientos:"]
     for entry in entries:
@@ -346,11 +346,11 @@ def identity(chat_id: int, user: dict[str, Any], display_name: str | None = None
 def friendly_api_error(exc: Exception) -> str:
     text = str(exc)
     if "conversion_status=executing" in text:
-        return "Tu compra ya esta en proceso. Espera un momento, por favor."
+        return "Tu compra ya está en proceso. Espera un momento, por favor."
     if "conversion_status=settled" in text:
-        return "Esta orden ya fue procesada. Usa /saldo para ver tu oro digital."
+        return "Esta orden ya fue procesada. Usa /saldo para ver tu oro digital 🥇."
     if "balance is not enough" in text or "balance-insufficient" in text:
-        return "El pago fue confirmado. Estamos acreditando tu oro digital."
+        return "El pago fue confirmado. Estamos acreditando tu oro digital 🥇."
     return text
 
 
