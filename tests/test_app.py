@@ -811,9 +811,10 @@ def test_admin_orders_shows_attention_queue(tmp_path) -> None:
     response = client.get("/admin/orders")
 
     assert response.status_code == 200
-    assert "Atencion operativa" in response.text
-    assert "Preparar XAUT" in response.text
-    assert "Marcar atencion" in response.text
+    assert "Pagadas" in response.text
+    assert "No pagadas" in response.text
+    assert "Preparar XAUT" not in response.text
+    assert "Marcar atencion" not in response.text
     assert order["external_id"] in response.text
 
 

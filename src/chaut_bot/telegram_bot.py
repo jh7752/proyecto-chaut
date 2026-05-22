@@ -64,7 +64,7 @@ def handle_update(update: dict[str, Any]) -> None:
     elif text.lower() in {"hola", "buenas", "hello", "hi"}:
         welcome_or_onboard(chat_id, user)
     else:
-        send_text(chat_id, "Hola. Soy Chaut, tu asistente para comprar oro digital 🥇\n\nUsa /ahorros para empezar o /saldo para ver tu cuenta.")
+        send_text(chat_id, "Hola. Soy Chaut, tu asistente para ahorrar en oro digital 🥇\n\nUsa /ahorros para empezar o /saldo para ver tu cuenta.")
 
 
 def handle_callback(callback: dict[str, Any]) -> None:
@@ -83,7 +83,7 @@ def handle_callback(callback: dict[str, Any]) -> None:
         else:
             ask_name(chat_id)
     elif data == "menu:ahorros":
-        send_savings_menu(chat_id, "¿Cuánto quieres comprar hoy en oro digital 🥇?")
+        send_savings_menu(chat_id, "¿Cuánto quieres ahorrar hoy en oro digital 🥇?")
     elif data.startswith("ahorros:") and not account_exists(user.get("id", chat_id)):
         send_text(chat_id, "Con mucho gusto. Primero dime tu nombre para dejar tu cuenta bien organizada.")
         ask_name(chat_id)
@@ -93,7 +93,7 @@ def handle_callback(callback: dict[str, Any]) -> None:
         create_checkout(chat_id, user, 10000)
     elif data == "ahorros:custom":
         PENDING_CUSTOM_AMOUNTS.add(chat_id)
-        send_text(chat_id, "¿Cuánto quieres comprar?\n\nEscribe el monto en COP. Mínimo 5.000. Ejemplo: 25.000")
+        send_text(chat_id, "¿Cuánto quieres ahorrar?\n\nEscribe el monto en COP. Mínimo 5.000. Ejemplo: 25.000")
     elif data.startswith("paid:"):
         settle_order(chat_id, data.split(":", 1)[1])
     elif data == "saldo":
@@ -108,7 +108,7 @@ def handle_custom_amount(chat_id: int, user: dict[str, Any], text: str) -> None:
         send_text(chat_id, "No pude leer ese monto. Escríbelo así, porfa: 25.000")
         return
     if amount < MIN_COP:
-        send_text(chat_id, "El mínimo para comprar oro digital 🥇 es 5.000 COP. Escribe otro monto, porfa.")
+        send_text(chat_id, "El mínimo para ahorrar en oro digital 🥇 es 5.000 COP. Escribe otro monto, porfa.")
         return
     PENDING_CUSTOM_AMOUNTS.discard(chat_id)
     if not account_exists(user.get("id", chat_id)):
@@ -133,9 +133,9 @@ def welcome_or_onboard(chat_id: int, user: dict[str, Any], savings: bool = False
         account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
         name = account.get("display_name") or "de vuelta"
         if savings:
-            send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital 🥇?")
+            send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres ahorrar hoy en oro digital 🥇?")
         else:
-            send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital 🥇?")
+            send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres ahorrar hoy en oro digital 🥇?")
         return
     start_onboarding(chat_id)
 
@@ -143,14 +143,14 @@ def welcome_or_onboard(chat_id: int, user: dict[str, Any], savings: bool = False
 def welcome_existing_user(chat_id: int, user: dict[str, Any]) -> None:
     account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
     name = account.get("display_name") or "de vuelta"
-    send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres comprar hoy en oro digital 🥇?")
+    send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}\n\n¿Cuánto quieres ahorrar hoy en oro digital 🥇?")
 
 
 def start_onboarding(chat_id: int) -> None:
     PENDING_NAMES[chat_id] = True
     send_text(
         chat_id,
-        "Hola, qué gusto tenerte por aquí 🥇\n\nSoy Chaut, tu asistente para comprar oro digital 🥇.\n\nPara crear tu cuenta, dime tu nombre y apellido.",
+        "Hola, qué gusto tenerte por aquí 🥇\n\nSoy Chaut, tu asistente para ahorrar en oro digital 🥇.\n\nPara crear tu cuenta, dime tu nombre y apellido.",
     )
 
 
@@ -158,7 +158,7 @@ def ensure_account_then_menu(chat_id: int, user: dict[str, Any]) -> None:
     if account_exists(user.get("id", chat_id)):
         account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
         name = account.get("display_name") or "de vuelta"
-        send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}. ¿Cuánto quieres comprar hoy en oro digital 🥇?")
+        send_savings_menu(chat_id, f"Qué gusto tenerte de vuelta, {name}. ¿Cuánto quieres ahorrar hoy en oro digital 🥇?")
     else:
         send_text(
             chat_id,
@@ -215,7 +215,7 @@ def send_savings_menu(chat_id: int, message: str = "¿Qué quieres hacer hoy?") 
 
 def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None:
     if amount_cop < MIN_COP:
-        send_text(chat_id, "El mínimo para comprar oro digital 🥇 es 5.000 COP.")
+        send_text(chat_id, "El mínimo para ahorrar en oro digital 🥇 es 5.000 COP.")
         return
     send_text(chat_id, "Dame un momento, estoy generando tu referencia Bre-B.")
     account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")

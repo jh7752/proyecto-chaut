@@ -104,11 +104,9 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     .money {{ font-weight:850; letter-spacing:-.02em; white-space:nowrap; }}
     .date {{ min-width:190px; }}
     pre {{ white-space:pre-wrap; max-height:360px; overflow:auto; background:#132018; color:#f7f0d4; padding:14px; border-radius:16px; font-size:12px; line-height:1.45; }}
-    form.inline {{ display:inline-flex; margin:4px 6px 4px 0; }}
-    button.action {{ cursor:pointer; border:1px solid var(--line); border-radius:999px; padding:10px 14px; background:rgba(255,255,255,.74); color:var(--ink); font-weight:800; box-shadow:0 8px 26px rgba(39,65,43,.06); }}
-    button.action:hover {{ border-color:rgba(201,150,51,.62); transform:translateY(-1px); background:rgba(255,249,232,.9); }}
-    button.danger {{ color:var(--bad); border-color:rgba(181,69,53,.26); }}
-    .actions {{ display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }}
+    .day-group {{ margin:0 0 22px; }}
+    .day-title {{ margin:18px 0 10px; display:inline-flex; align-items:center; gap:9px; border:1px solid var(--line); border-radius:999px; padding:8px 12px; background:rgba(255,255,255,.62); color:var(--leaf); font-weight:900; }}
+    .day-title:before {{ content:""; width:8px; height:8px; border-radius:50%; background:var(--gold); }}
     .split {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.45fr); gap:16px; align-items:start; }}
     ul.clean {{ margin:0; padding-left:18px; }}
     .empty {{ text-align:center; padding:28px; color:#75836b; }}
@@ -165,8 +163,6 @@ def admin_dashboard(store: OrderStore, token: str | None = None) -> HTMLResponse
       <div class="card"><div class="muted">Oro digital acreditado</div><div class="metric">{total_grams:.12f} g</div><p class="muted">Suma de compras settled con ledger entry.</p></div>
       <div class="card"><div class="muted">Movimientos reales</div><div class="metric">{total_entries}</div><p class="muted">Solo compras con ledger entry suman al saldo.</p></div>
     </section>
-    <div class="section-head"><h2>Atencion operativa</h2><span class="badge">Revisar primero</span></div>
-    {orders_table(attention_orders[:12], token, events_by_order=events_map(store, attention_orders[:12]))}
     <div class="section-head"><h2>Ordenes relevantes</h2><span class="badge">Ultimas 12</span></div>
     {orders_table(active_orders[:12], token, events_by_order=events_map(store, active_orders[:12]))}
     <div class="section-head"><h2>Legado / pruebas</h2><span class="muted">Auditoria</span></div>
@@ -179,18 +175,14 @@ def admin_dashboard(store: OrderStore, token: str | None = None) -> HTMLResponse
 def admin_orders(store: OrderStore, token: str | None = None) -> HTMLResponse:
     orders = store.list_orders(200)
     active = [order for order in orders if order.conversion_status not in LEGACY_STATES]
-    attention = [order for order in active if needs_attention(order)]
     paid = [order for order in active if order.payment_status == "confirmed"]
-    expired = [order for order in active if order.payment_status in EXPIRED_STATES]
-    unpaid = [order for order in active if order.payment_status not in {"confirmed", "expired"}]
+    unpaid = [order for order in active if order.payment_status != "confirmed"]
     legacy = [order for order in orders if order.conversion_status in LEGACY_STATES]
     body = f"""
-    <section class="hero"><div class="grid">{metric_card("Atencion", len(attention))}{metric_card("Pagadas", len(paid))}{metric_card("Pendientes vivas", len(unpaid))}{metric_card("Expiradas", len(expired))}{metric_card("Legado", len(legacy))}{metric_card("Total", len(orders))}</div></section>
-    <div class="section-head"><h2>Atencion operativa</h2><span class="badge">Revisar primero</span></div><p class="muted">Pagos ambiguos, compras en ejecucion o pagos confirmados sin XAUT settled.</p>{orders_table(attention, token, events_by_order=events_map(store, attention))}
-    <div class="section-head"><h2>Pagadas / operables</h2><span class="badge">Pago confirmado</span></div><p class="muted">Ordenes con pago confirmado. Si XAUT dice not_started, falta ejecutar settlement o es una orden anterior a la trazabilidad fina.</p>{orders_table(paid, token, events_by_order=events_map(store, paid))}
-    <div class="section-head"><h2>Pendientes vivas</h2><span class="badge">Dentro de ventana</span></div><p class="muted">PaymentRequests que aun no han confirmado pago y no han expirado.</p>{orders_table(unpaid, token, compact=True, events_by_order=events_map(store, unpaid))}
-    <div class="section-head"><h2>Expiradas</h2><span class="muted">No afectan saldo</span></div>{orders_table(expired, token, compact=True, legacy=True, events_by_order=events_map(store, expired))}
-    <div class="section-head"><h2>Legado / pruebas</h2><span class="muted">Historico</span></div>{orders_table(legacy, token, legacy=True, events_by_order=events_map(store, legacy))}
+    <section class="hero"><div class="grid">{metric_card("Pagadas", len(paid))}{metric_card("No pagadas", len(unpaid))}{metric_card("Legado", len(legacy))}{metric_card("Total", len(orders))}</div></section>
+    <div class="section-head"><h2>Pagadas</h2><span class="badge">Confirmadas</span></div><p class="muted">Ordenes con pago confirmado, agrupadas por dia operativo.</p>{grouped_orders_by_day(store, paid, token)}
+    <div class="section-head"><h2>No pagadas</h2><span class="badge">Pendientes y expiradas</span></div><p class="muted">PaymentRequests pendientes, ambiguas o expiradas. Para expiradas se muestra la fecha real de vencimiento.</p>{grouped_orders_by_day(store, unpaid, token, compact=True)}
+    <div class="section-head"><h2>Legado / pruebas</h2><span class="muted">Historico</span></div>{grouped_orders_by_day(store, legacy, token, legacy=True)}
     """
     return render_admin("Ordenes", body, token)
 
@@ -211,7 +203,6 @@ def admin_order_detail(store: OrderStore, external_id: str, token: str | None = 
         <p><b>Pago:</b> {status_pill(order.payment_status)}</p>
         <p><b>Conversion:</b> {conversion_pill(order.conversion_status)}</p>
         {portfolio_link}
-        {admin_action_panel(order, token)}
       </div>
       <div class="card">
         <p class="muted">Monto</p>
@@ -263,20 +254,22 @@ def admin_account_detail(store: OrderStore, customer_id: str, token: str | None 
     return render_admin("Usuario", body, token)
 
 
-def admin_action_panel(order, token: str | None = None) -> str:
-    token_part = f"&token={escape(token)}" if token else ""
-    external_id = escape(order.external_id)
-    actions = [
-        f'<form class="inline" method="post" action="/admin/orders/{external_id}/reconcile?redirect=detail{token_part}"><button class="action" type="submit">Revisar pago</button></form>',
-        f'<form class="inline" method="post" action="/admin/orders/{external_id}/prepare-xaut?redirect=detail{token_part}"><button class="action" type="submit">Preparar XAUT</button></form>',
-        f'<form class="inline" method="post" action="/admin/orders/{external_id}/mark-attention?redirect=detail{token_part}"><button class="action" type="submit">Marcar atencion</button></form>',
-    ]
-    if order.payment_status == "confirmed" and order.conversion_status not in SETTLED_STATES | LEGACY_STATES:
-        actions.append(
-            f'<form class="inline" method="post" action="/admin/orders/{external_id}/settle-xaut?redirect=detail&confirm=EXECUTE_HTX_XAUT_BUY{token_part}"><button class="action danger" type="submit">Ejecutar settlement</button></form>'
-        )
-    return '<div class="actions">' + ''.join(actions) + '</div>'
 
+def grouped_orders_by_day(store: OrderStore, orders, token: str | None = None, legacy: bool = False, compact: bool = False) -> str:
+    events_by_order = events_map(store, orders)
+    groups: dict[str, list] = {}
+    for order in orders:
+        _, main_date, _, _ = order_date_context(order, events_by_order.get(order.external_id, []))
+        groups.setdefault(format_bogota_day(main_date), []).append(order)
+    if not groups:
+        return orders_table([], token, legacy=legacy, compact=compact)
+    sections = []
+    for day, day_orders in groups.items():
+        sections.append(
+            f'<section class="day-group"><div class="day-title">{escape(day)}</div>'
+            f'{orders_table(day_orders, token, legacy=legacy, compact=compact, events_by_order=events_by_order)}</section>'
+        )
+    return "".join(sections)
 
 def events_map(store: OrderStore, orders) -> dict[str, list]:
     return {order.external_id: store.list_events(order.external_id) for order in orders}
@@ -294,12 +287,11 @@ def orders_table(orders, token: str | None = None, legacy: bool = False, compact
             f"<td><code>{customer}</code></td><td class='money'>{order.amount_cop_gross:,.0f}</td><td>{order.payment_amount or ''}</td>"
             f"<td>{status_pill(order.payment_status)}</td><td>{conversion_pill(order.conversion_status)}</td>"
             f"<td>{attention_pill(order)}</td>"
-            f"<td>{admin_action_panel(order, token)}</td>"
             f"<td class='date'>{escape(date_label)}: {format_bogota_time(main_date)}<br><span class='muted'>{escape(secondary_label)}: {format_bogota_time(secondary_date)}</span></td></tr>"
         )
     if not rows:
-        rows.append("<tr><td colspan='9' class='empty'>Sin registros.</td></tr>")
-    return "<div class='table-wrap'><table><tr><th>Orden</th><th>Usuario</th><th>COP</th><th>USDT</th><th>Pago</th><th>XAUT</th><th>Operacion</th><th>Acciones</th><th>Fecha operativa</th></tr>" + "".join(rows) + "</table></div>"
+        rows.append("<tr><td colspan='8' class='empty'>Sin registros.</td></tr>")
+    return "<div class='table-wrap'><table><tr><th>Orden</th><th>Usuario</th><th>COP</th><th>USDT</th><th>Pago</th><th>XAUT</th><th>Operacion</th><th>Fecha operativa</th></tr>" + "".join(rows) + "</table></div>"
 
 
 def order_date_context(order, events: list) -> tuple[str, str, str, str]:
@@ -360,6 +352,18 @@ def conversion_pill(text: str) -> str:
 def _token_qs(token: str | None) -> str:
     return f"?token={escape(token)}" if token else ""
 
+
+
+def format_bogota_day(value: str) -> str:
+    try:
+        normalized = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local = dt.astimezone(timezone(timedelta(hours=-5)))
+        return escape(local.strftime("%Y-%m-%d"))
+    except Exception:
+        return escape(value[:10] if value else "Sin fecha")
 
 def format_bogota_time(value: str) -> str:
     try:
