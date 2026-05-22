@@ -104,14 +104,24 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     .money {{ font-weight:850; letter-spacing:-.02em; white-space:nowrap; }}
     .date {{ min-width:190px; }}
     pre {{ white-space:pre-wrap; max-height:360px; overflow:auto; background:#132018; color:#f7f0d4; padding:14px; border-radius:16px; font-size:12px; line-height:1.45; }}
-    .day-group {{ margin:0 0 22px; }}
+    .day-group {{ margin:0 0 24px; position:relative; }}
     .day-title {{ margin:18px 0 10px; display:inline-flex; align-items:center; gap:9px; border:1px solid var(--line); border-radius:999px; padding:8px 12px; background:rgba(255,255,255,.62); color:var(--leaf); font-weight:900; }}
     .day-title:before {{ content:""; width:8px; height:8px; border-radius:50%; background:var(--gold); }}
+    .timeline {{ display:grid; gap:11px; position:relative; }}
+    .timeline:before {{ content:""; position:absolute; left:16px; top:8px; bottom:8px; width:2px; background:linear-gradient(var(--gold),rgba(129,155,98,.28)); }}
+    .order-card {{ position:relative; display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:13px; align-items:center; margin-left:0; padding:14px 16px 14px 44px; border:1px solid var(--line); border-radius:24px; background:rgba(255,252,240,.86); box-shadow:var(--soft-shadow); }}
+    .order-card:before {{ content:""; position:absolute; left:10px; top:50%; width:14px; height:14px; transform:translateY(-50%); border-radius:50%; background:var(--paper); border:3px solid var(--gold); box-shadow:0 0 0 5px rgba(201,150,51,.12); }}
+    .order-card:hover {{ transform:translateY(-1px); border-color:rgba(201,150,51,.34); }}
+    .order-main {{ display:grid; gap:6px; min-width:0; }}
+    .order-meta {{ display:flex; flex-wrap:wrap; gap:7px; align-items:center; }}
+    .order-money {{ text-align:right; min-width:128px; }}
+    .order-money strong {{ display:block; font-size:22px; letter-spacing:-.04em; }}
+    .order-time {{ color:#75836b; font-size:13px; white-space:nowrap; }}
     .split {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.45fr); gap:16px; align-items:start; }}
     ul.clean {{ margin:0; padding-left:18px; }}
     .empty {{ text-align:center; padding:28px; color:#75836b; }}
     @media (max-width:760px) {{
-      .shell {{ width:min(100% - 22px,1180px); }} header {{ align-items:start; grid-template-columns:1fr; }} .brand {{ align-items:flex-start; }} .mark {{ width:48px; height:48px; border-radius:16px; }} .statusbar {{ justify-content:flex-start; }} .split {{ grid-template-columns:1fr; }} table {{ min-width:720px; }} th,td {{ padding:12px; }}
+      .shell {{ width:min(100% - 22px,1180px); }} header {{ align-items:start; grid-template-columns:1fr; }} .brand {{ align-items:flex-start; }} .mark {{ width:48px; height:48px; border-radius:16px; }} .statusbar {{ justify-content:flex-start; }} .split {{ grid-template-columns:1fr; }} table {{ min-width:720px; }} th,td {{ padding:12px; }} .order-card {{ grid-template-columns:1fr; padding:14px 14px 14px 40px; }} .order-money {{ text-align:left; }}
     }}
   </style>
 </head>
@@ -163,8 +173,8 @@ def admin_dashboard(store: OrderStore, token: str | None = None) -> HTMLResponse
       <div class="card"><div class="muted">Oro digital acreditado</div><div class="metric">{total_grams:.12f} g</div><p class="muted">Suma de compras settled con ledger entry.</p></div>
       <div class="card"><div class="muted">Movimientos reales</div><div class="metric">{total_entries}</div><p class="muted">Solo compras con ledger entry suman al saldo.</p></div>
     </section>
-    <div class="section-head"><h2>Ordenes relevantes</h2><span class="badge">Ultimas 12</span></div>
-    {orders_table(active_orders[:12], token, events_by_order=events_map(store, active_orders[:12]))}
+    <div class="section-head"><h2>Ultimas ordenes</h2><span class="badge">Resumen rapido</span></div>
+    {split_orders_timeline(store, active_orders[:24], token)}
     <div class="section-head"><h2>Legado / pruebas</h2><span class="muted">Auditoria</span></div>
     <p class="muted">Ordenes voided o fallidas se conservan para auditoria, pero no afectan saldos.</p>
     {orders_table([order for order in orders if order.conversion_status in LEGACY_STATES][:8], token, legacy=True, events_by_order=events_map(store, [order for order in orders if order.conversion_status in LEGACY_STATES][:8]))}
@@ -180,8 +190,8 @@ def admin_orders(store: OrderStore, token: str | None = None) -> HTMLResponse:
     legacy = [order for order in orders if order.conversion_status in LEGACY_STATES]
     body = f"""
     <section class="hero"><div class="grid">{metric_card("Pagadas", len(paid))}{metric_card("No pagadas", len(unpaid))}{metric_card("Legado", len(legacy))}{metric_card("Total", len(orders))}</div></section>
-    <div class="section-head"><h2>Pagadas</h2><span class="badge">Confirmadas</span></div><p class="muted">Ordenes con pago confirmado, agrupadas por dia operativo.</p>{grouped_orders_by_day(store, paid, token)}
-    <div class="section-head"><h2>No pagadas</h2><span class="badge">Pendientes y expiradas</span></div><p class="muted">PaymentRequests pendientes, ambiguas o expiradas. Para expiradas se muestra la fecha real de vencimiento.</p>{grouped_orders_by_day(store, unpaid, token, compact=True)}
+    <div class="section-head"><h2>Pagadas</h2><span class="badge">Confirmadas</span></div><p class="muted">Ordenes confirmadas, ordenadas por fecha de compra y separadas por dia.</p>{grouped_orders_by_day(store, paid, token, view="cards")}
+    <div class="section-head"><h2>No pagadas</h2><span class="badge">Pendientes y expiradas</span></div><p class="muted">PaymentRequests pendientes, ambiguas o expiradas. Las expiradas usan la fecha real de vencimiento.</p>{grouped_orders_by_day(store, unpaid, token, compact=True, view="cards")}
     <div class="section-head"><h2>Legado / pruebas</h2><span class="muted">Historico</span></div>{grouped_orders_by_day(store, legacy, token, legacy=True)}
     """
     return render_admin("Ordenes", body, token)
@@ -255,24 +265,59 @@ def admin_account_detail(store: OrderStore, customer_id: str, token: str | None 
 
 
 
-def grouped_orders_by_day(store: OrderStore, orders, token: str | None = None, legacy: bool = False, compact: bool = False) -> str:
+def split_orders_timeline(store: OrderStore, orders, token: str | None = None) -> str:
+    active = [order for order in orders if order.conversion_status not in LEGACY_STATES]
+    paid = [order for order in active if order.payment_status == "confirmed"]
+    unpaid = [order for order in active if order.payment_status != "confirmed"]
+    return (
+        '<div class="split">'
+        f'<div><div class="section-head"><h2>Pagadas</h2><span class="badge">{len(paid)}</span></div>{grouped_orders_by_day(store, paid, token, view="cards")}</div>'
+        f'<div><div class="section-head"><h2>No pagadas</h2><span class="badge">{len(unpaid)}</span></div>{grouped_orders_by_day(store, unpaid, token, compact=True, view="cards")}</div>'
+        '</div>'
+    )
+
+
+def grouped_orders_by_day(store: OrderStore, orders, token: str | None = None, legacy: bool = False, compact: bool = False, view: str = "table") -> str:
     events_by_order = events_map(store, orders)
-    groups: dict[str, list] = {}
+    dated_orders = []
     for order in orders:
         _, main_date, _, _ = order_date_context(order, events_by_order.get(order.external_id, []))
-        groups.setdefault(format_bogota_day(main_date), []).append(order)
+        dated_orders.append((order_sort_key(main_date), format_bogota_day(main_date), order))
+    dated_orders.sort(key=lambda item: item[0], reverse=True)
+    groups: dict[str, list] = {}
+    for _, day, order in dated_orders:
+        groups.setdefault(day, []).append(order)
     if not groups:
-        return orders_table([], token, legacy=legacy, compact=compact)
+        return order_cards([], token, legacy=legacy, compact=compact, events_by_order=events_by_order) if view == "cards" else orders_table([], token, legacy=legacy, compact=compact)
     sections = []
     for day, day_orders in groups.items():
-        sections.append(
-            f'<section class="day-group"><div class="day-title">{escape(day)}</div>'
-            f'{orders_table(day_orders, token, legacy=legacy, compact=compact, events_by_order=events_by_order)}</section>'
-        )
+        content = order_cards(day_orders, token, legacy=legacy, compact=compact, events_by_order=events_by_order) if view == "cards" else orders_table(day_orders, token, legacy=legacy, compact=compact, events_by_order=events_by_order)
+        sections.append(f'<section class="day-group"><div class="day-title">{escape(day)}</div>{content}</section>')
     return "".join(sections)
+
 
 def events_map(store: OrderStore, orders) -> dict[str, list]:
     return {order.external_id: store.list_events(order.external_id) for order in orders}
+
+
+def order_cards(orders, token: str | None = None, legacy: bool = False, compact: bool = False, events_by_order: dict[str, list] | None = None) -> str:
+    if not orders:
+        return '<div class="card empty">Sin registros.</div>'
+    cards = []
+    for order in orders:
+        row_events = (events_by_order or {}).get(order.external_id, [])
+        date_label, main_date, secondary_label, secondary_date = order_date_context(order, row_events)
+        customer = "-" if compact else escape(order.customer_id or "-")
+        legacy_class = " legacy" if legacy else ""
+        cards.append(
+            f'<article class="order-card{legacy_class}">'
+            f'<div class="order-main"><a class="order-id" href="/admin/orders/{escape(order.external_id)}{_token_qs(token)}"><code>{escape(order.external_id)}</code></a>'
+            f'<div class="order-meta"><code>{customer}</code>{status_pill(order.payment_status)}{conversion_pill(order.conversion_status)}{attention_pill(order)}</div>'
+            f'<div class="order-time">{escape(date_label)}: {format_bogota_time(main_date)} · {escape(secondary_label)}: {format_bogota_time(secondary_date)}</div></div>'
+            f'<div class="order-money"><strong>{order.amount_cop_gross:,.0f}</strong><span class="muted">COP</span></div>'
+            '</article>'
+        )
+    return '<div class="timeline">' + ''.join(cards) + '</div>'
 
 
 def orders_table(orders, token: str | None = None, legacy: bool = False, compact: bool = False, events_by_order: dict[str, list] | None = None) -> str:
@@ -352,6 +397,17 @@ def conversion_pill(text: str) -> str:
 def _token_qs(token: str | None) -> str:
     return f"?token={escape(token)}" if token else ""
 
+
+
+def order_sort_key(value: str) -> datetime:
+    try:
+        normalized = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return datetime.min.replace(tzinfo=timezone.utc)
 
 
 def format_bogota_day(value: str) -> str:

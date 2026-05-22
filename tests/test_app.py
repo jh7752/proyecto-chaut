@@ -813,9 +813,28 @@ def test_admin_orders_shows_attention_queue(tmp_path) -> None:
     assert response.status_code == 200
     assert "Pagadas" in response.text
     assert "No pagadas" in response.text
+    assert "day-title" in response.text
+    assert "timeline" in response.text
     assert "Preparar XAUT" not in response.text
     assert "Marcar atencion" not in response.text
     assert order["external_id"] in response.text
+
+
+def test_admin_dashboard_splits_latest_orders_by_payment_state(tmp_path) -> None:
+    client = make_client(tmp_path)
+    unpaid = client.post("/orders", json={"client_id": "cli-unpaid", "amount_cop_gross": 50000}).json()
+    paid = client.post("/orders", json={"client_id": "cli-paid", "amount_cop_gross": 100000}).json()
+    client.post(f"/orders/{paid['external_id']}/payment-request", json={"expiration_minutes": 60})
+    client.post(f"/orders/{paid['external_id']}/payment-request/check")
+
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert "Ultimas ordenes" in response.text
+    assert "Pagadas" in response.text
+    assert "No pagadas" in response.text
+    assert paid["external_id"] in response.text
+    assert unpaid["external_id"] in response.text
 
 
 def test_admin_mark_attention_records_event(tmp_path) -> None:
