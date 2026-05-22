@@ -107,21 +107,26 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     .day-group {{ margin:0 0 24px; position:relative; }}
     .day-title {{ margin:18px 0 10px; display:inline-flex; align-items:center; gap:9px; border:1px solid var(--line); border-radius:999px; padding:8px 12px; background:rgba(255,255,255,.62); color:var(--leaf); font-weight:900; }}
     .day-title:before {{ content:""; width:8px; height:8px; border-radius:50%; background:var(--gold); }}
-    .timeline {{ display:grid; gap:11px; position:relative; }}
+    .timeline {{ display:grid; gap:11px; position:relative; min-width:0; }}
     .timeline:before {{ content:""; position:absolute; left:16px; top:8px; bottom:8px; width:2px; background:linear-gradient(var(--gold),rgba(129,155,98,.28)); }}
-    .order-card {{ position:relative; display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:13px; align-items:center; margin-left:0; padding:14px 16px 14px 44px; border:1px solid var(--line); border-radius:24px; background:rgba(255,252,240,.86); box-shadow:var(--soft-shadow); }}
-    .order-card:before {{ content:""; position:absolute; left:10px; top:50%; width:14px; height:14px; transform:translateY(-50%); border-radius:50%; background:var(--paper); border:3px solid var(--gold); box-shadow:0 0 0 5px rgba(201,150,51,.12); }}
+    .order-card {{ position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; align-items:start; padding:14px 16px 14px 44px; border:1px solid var(--line); border-radius:24px; background:rgba(255,252,240,.86); box-shadow:var(--soft-shadow); min-width:0; }}
+    .order-card:before {{ content:""; position:absolute; left:10px; top:18px; width:14px; height:14px; border-radius:50%; background:var(--paper); border:3px solid var(--gold); box-shadow:0 0 0 5px rgba(201,150,51,.12); }}
     .order-card:hover {{ transform:translateY(-1px); border-color:rgba(201,150,51,.34); }}
-    .order-main {{ display:grid; gap:6px; min-width:0; }}
+    .order-main {{ display:grid; gap:7px; min-width:0; }}
+    .order-main .order-id {{ max-width:100%; overflow:hidden; }}
+    .order-main code {{ overflow-wrap:anywhere; }}
     .order-meta {{ display:flex; flex-wrap:wrap; gap:7px; align-items:center; }}
-    .order-money {{ text-align:right; min-width:128px; }}
-    .order-money strong {{ display:block; font-size:22px; letter-spacing:-.04em; }}
-    .order-time {{ color:#75836b; font-size:13px; white-space:nowrap; }}
+    .order-money {{ text-align:right; min-width:112px; }}
+    .order-money strong {{ display:block; font-size:22px; letter-spacing:-.04em; line-height:1; }}
+    .order-time {{ color:#75836b; font-size:13px; line-height:1.35; overflow-wrap:anywhere; }}
+    .orders-split {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; align-items:start; }}
+    .orders-panel {{ min-width:0; }}
+    .orders-panel .section-head {{ margin:0 0 10px; }}
     .split {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.45fr); gap:16px; align-items:start; }}
     ul.clean {{ margin:0; padding-left:18px; }}
     .empty {{ text-align:center; padding:28px; color:#75836b; }}
     @media (max-width:760px) {{
-      .shell {{ width:min(100% - 22px,1180px); }} header {{ align-items:start; grid-template-columns:1fr; }} .brand {{ align-items:flex-start; }} .mark {{ width:48px; height:48px; border-radius:16px; }} .statusbar {{ justify-content:flex-start; }} .split {{ grid-template-columns:1fr; }} table {{ min-width:720px; }} th,td {{ padding:12px; }} .order-card {{ grid-template-columns:1fr; padding:14px 14px 14px 40px; }} .order-money {{ text-align:left; }}
+      .shell {{ width:min(100% - 22px,1180px); }} header {{ align-items:start; grid-template-columns:1fr; }} .brand {{ align-items:flex-start; }} .mark {{ width:48px; height:48px; border-radius:16px; }} .statusbar {{ justify-content:flex-start; }} .split,.orders-split {{ grid-template-columns:1fr; }} table {{ min-width:720px; }} th,td {{ padding:12px; }} .order-card {{ grid-template-columns:1fr; padding:14px 14px 14px 40px; }} .order-money {{ text-align:left; }}
     }}
   </style>
 </head>
@@ -174,7 +179,7 @@ def admin_dashboard(store: OrderStore, token: str | None = None) -> HTMLResponse
       <div class="card"><div class="muted">Movimientos reales</div><div class="metric">{total_entries}</div><p class="muted">Solo compras con ledger entry suman al saldo.</p></div>
     </section>
     <div class="section-head"><h2>Ultimas ordenes</h2><span class="badge">Resumen rapido</span></div>
-    {split_orders_timeline(store, active_orders[:24], token)}
+    {split_orders_timeline(store, active_orders, token)}
     <div class="section-head"><h2>Legado / pruebas</h2><span class="muted">Auditoria</span></div>
     <p class="muted">Ordenes voided o fallidas se conservan para auditoria, pero no afectan saldos.</p>
     {orders_table([order for order in orders if order.conversion_status in LEGACY_STATES][:8], token, legacy=True, events_by_order=events_map(store, [order for order in orders if order.conversion_status in LEGACY_STATES][:8]))}
@@ -267,12 +272,12 @@ def admin_account_detail(store: OrderStore, customer_id: str, token: str | None 
 
 def split_orders_timeline(store: OrderStore, orders, token: str | None = None) -> str:
     active = [order for order in orders if order.conversion_status not in LEGACY_STATES]
-    paid = [order for order in active if order.payment_status == "confirmed"]
-    unpaid = [order for order in active if order.payment_status != "confirmed"]
+    paid = [order for order in active if order.payment_status == "confirmed"][:12]
+    unpaid = [order for order in active if order.payment_status != "confirmed"][:12]
     return (
-        '<div class="split">'
-        f'<div><div class="section-head"><h2>Pagadas</h2><span class="badge">{len(paid)}</span></div>{grouped_orders_by_day(store, paid, token, view="cards")}</div>'
-        f'<div><div class="section-head"><h2>No pagadas</h2><span class="badge">{len(unpaid)}</span></div>{grouped_orders_by_day(store, unpaid, token, compact=True, view="cards")}</div>'
+        '<div class="orders-split">'
+        f'<section class="orders-panel"><div class="section-head"><h2>Pagadas</h2><span class="badge">{len(paid)}</span></div>{grouped_orders_by_day(store, paid, token, view="cards")}</section>'
+        f'<section class="orders-panel"><div class="section-head"><h2>No pagadas</h2><span class="badge">{len(unpaid)}</span></div>{grouped_orders_by_day(store, unpaid, token, compact=True, view="cards")}</section>'
         '</div>'
     )
 
