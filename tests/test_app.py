@@ -921,4 +921,5 @@ def test_admin_account_detail_shows_credit_profile(tmp_path) -> None:
     assert response.status_code == 200
     assert "Perfil crediticio interno" in response.text
     assert "Cupo sugerido" in response.text
-    assert "Score" in response.text
+    assert "score-ring" in response.text
+    assert "Ledger" in response.text

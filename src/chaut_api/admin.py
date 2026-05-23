@@ -123,10 +123,23 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     .orders-panel {{ min-width:0; }}
     .orders-panel .section-head {{ margin:0 0 10px; }}
     .split {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.45fr); gap:16px; align-items:start; }}
+    .profile-tabs {{ margin-top:14px; display:grid; gap:14px; }}
+    .tab-nav {{ display:flex; flex-wrap:wrap; gap:9px; padding:8px; border:1px solid var(--line); border-radius:999px; background:rgba(255,255,255,.42); width:max-content; max-width:100%; }}
+    .tab-nav a {{ text-decoration:none; color:var(--leaf); font-weight:900; border-radius:999px; padding:9px 13px; background:rgba(255,255,255,.62); border:1px solid transparent; }}
+    .tab-nav a:hover {{ border-color:rgba(201,150,51,.44); color:var(--ink); }}
+    .profile-panel {{ scroll-margin-top:96px; }}
+    .credit-card {{ display:grid; grid-template-columns:minmax(140px,.45fr) minmax(0,1fr); gap:16px; align-items:center; }}
+    .score-ring {{ width:132px; height:132px; border-radius:50%; display:grid; place-items:center; margin:auto; background:conic-gradient(var(--gold) calc(var(--score) * 1%), rgba(129,155,98,.18) 0); box-shadow:inset 0 0 0 12px rgba(255,249,232,.92), var(--soft-shadow); }}
+    .score-ring strong {{ font-size:34px; letter-spacing:-.06em; }}
+    .kv-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }}
+    .kv {{ border:1px solid var(--line); border-radius:18px; padding:11px 12px; background:rgba(255,255,255,.48); }}
+    .kv b {{ display:block; margin-top:4px; font-size:18px; }}
+    .reason-list {{ display:grid; gap:8px; margin:12px 0 0; padding:0; list-style:none; }}
+    .reason-list li {{ border-left:3px solid var(--gold); padding:8px 10px; border-radius:12px; background:rgba(255,255,255,.48); }}
     ul.clean {{ margin:0; padding-left:18px; }}
     .empty {{ text-align:center; padding:28px; color:#75836b; }}
     @media (max-width:760px) {{
-      .shell {{ width:min(100% - 22px,1180px); }} header {{ align-items:start; grid-template-columns:1fr; }} .brand {{ align-items:flex-start; }} .mark {{ width:48px; height:48px; border-radius:16px; }} .statusbar {{ justify-content:flex-start; }} .split,.orders-split {{ grid-template-columns:1fr; }} table {{ min-width:720px; }} th,td {{ padding:12px; }} .order-card {{ grid-template-columns:1fr; padding:14px 14px 14px 40px; }} .order-money {{ text-align:left; }}
+      .shell {{ width:min(100% - 22px,1180px); }} header {{ align-items:start; grid-template-columns:1fr; }} .brand {{ align-items:flex-start; }} .mark {{ width:48px; height:48px; border-radius:16px; }} .statusbar {{ justify-content:flex-start; }} .split,.orders-split,.credit-card {{ grid-template-columns:1fr; }} table {{ min-width:720px; }} th,td {{ padding:12px; }} .order-card {{ grid-template-columns:1fr; padding:14px 14px 14px 40px; }} .order-money {{ text-align:left; }} .tab-nav {{ border-radius:22px; width:100%; }}
     }}
   </style>
 </head>
@@ -258,20 +271,33 @@ def admin_account_detail(store: OrderStore, customer_id: str, token: str | None 
         for entry in portfolio.entries
     )
     identities = "".join(f"<li>{escape(identity.provider)}: <code>{escape(identity.provider_user_id)}</code></li>" for identity in account.identities)
+    reasons = "".join(f"<li>{escape(reason)}</li>" for reason in credit.reasons)
     body = f"""
     <section class="hero"><div class="grid">
       {metric_card("COP invertido", f"{portfolio.cop_invested:,.0f}")}
-      {metric_card("XAUT neto", f"{portfolio.xaut_net:.18f}")}
-      {metric_card("Gramos oro", f"{portfolio.gold_grams_net:.12f}")}
+      {metric_card("Oro digital", f"{portfolio.gold_grams_net:.12f} g")}
       {metric_card("Rating", credit.rating)}
-      {metric_card("Score", f"{credit.score}/100")}
       {metric_card("Cupo sugerido", f"{credit.suggested_credit_limit_cop:,.0f} COP")}
     </div></section>
-    <div class="split">
-      <div class="card"><p><b>Usuario:</b> <code>{escape(account.customer_id)}</code></p><p><b>Nombre:</b> {escape(account.display_name or '-')}</p><ul class="clean">{identities}</ul></div>
-      <div class="card"><p class="muted">Perfil crediticio interno</p><p><b>LTV max:</b> {credit.max_ltv_percent:.0f}%</p><p><b>Garantia referencia:</b> {credit.collateral_value_cop:,.0f} COP</p><p><b>Ordenes:</b> {credit.paid_orders} pagadas / {credit.unpaid_orders} no pagadas / {credit.expired_orders} expiradas</p><ul class="clean">{''.join(f'<li>{escape(reason)}</li>' for reason in credit.reasons)}</ul></div>
-    </div>
-    <div class="section-head"><h2>Ledger</h2><span class="badge">{portfolio.entries_count} movimientos</span></div><div class="table-wrap"><table><tr><th>Fecha</th><th>Orden</th><th>COP</th><th>USDT</th><th>XAUT</th><th>Gramos</th></tr>{entries}</table></div>
+    <section class="profile-tabs">
+      <div class="tab-nav"><a href="#perfil">Perfil</a><a href="#credito">Credito</a><a href="#ledger">Ledger</a></div>
+      <div id="perfil" class="profile-panel card">
+        <div class="section-head"><h2>Perfil del usuario</h2><span class="badge">{escape(account.status)}</span></div>
+        <div class="kv-grid"><div class="kv"><span class="muted">Usuario</span><b><code>{escape(account.customer_id)}</code></b></div><div class="kv"><span class="muted">Nombre</span><b>{escape(account.display_name or '-')}</b></div><div class="kv"><span class="muted">Identidades</span><b>{len(account.identities)}</b></div></div>
+        <p class="muted">Canales vinculados</p><ul class="clean">{identities}</ul>
+      </div>
+      <div id="credito" class="profile-panel card credit-card">
+        <div class="score-ring" style="--score:{credit.score}"><strong>{credit.score}</strong><span>/100</span></div>
+        <div>
+          <div class="section-head"><h2>Perfil crediticio interno</h2><span class="badge">Rating {escape(credit.rating)}</span></div>
+          <div class="kv-grid"><div class="kv"><span class="muted">Cupo sugerido</span><b>{credit.suggested_credit_limit_cop:,.0f} COP</b></div><div class="kv"><span class="muted">LTV max</span><b>{credit.max_ltv_percent:.0f}%</b></div><div class="kv"><span class="muted">Garantia referencia</span><b>{credit.collateral_value_cop:,.0f} COP</b></div><div class="kv"><span class="muted">Ordenes</span><b>{credit.paid_orders} / {credit.unpaid_orders} / {credit.expired_orders}</b></div></div>
+          <ul class="reason-list">{reasons}</ul>
+        </div>
+      </div>
+      <div id="ledger" class="profile-panel">
+        <div class="section-head"><h2>Ledger</h2><span class="badge">{portfolio.entries_count} movimientos</span></div><div class="table-wrap"><table><tr><th>Fecha</th><th>Orden</th><th>COP</th><th>USDT</th><th>XAUT</th><th>Gramos</th></tr>{entries}</table></div>
+      </div>
+    </section>
     """
     return render_admin("Usuario", body, token)
 
