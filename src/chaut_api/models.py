@@ -216,6 +216,20 @@ class PortfolioResponse(BaseModel):
     entries: list[LedgerEntryResponse] = Field(default_factory=list)
 
 
+class CreditProfileResponse(BaseModel):
+    customer_id: str
+    score: int
+    rating: str
+    suggested_credit_limit_cop: int
+    max_ltv_percent: float
+    collateral_value_cop: float
+    paid_orders: int
+    unpaid_orders: int
+    expired_orders: int
+    identities_count: int
+    reasons: list[str] = Field(default_factory=list)
+
+
 class EventResponse(BaseModel):
     event_id: str
     entity_id: str

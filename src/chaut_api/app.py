@@ -28,6 +28,7 @@ from .coinsenda import (
 from .models import (
     AccountIdentityRequest,
     AccountResponse,
+    CreditProfileResponse,
     KucoinHealthResponse,
     KucoinInstrumentResponse,
     KucoinTickerResponse,
@@ -288,6 +289,14 @@ def create_app(
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
         return _with_estimated_portfolio_value(store.get_portfolio(customer_id), settings, coinsenda_client)
+
+    @app.get("/accounts/{customer_id}/credit-profile", response_model=CreditProfileResponse)
+    def get_account_credit_profile(customer_id: str) -> CreditProfileResponse:
+        account = store.get_account(customer_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        portfolio = _with_estimated_portfolio_value(store.get_portfolio(customer_id), settings, coinsenda_client)
+        return store.get_credit_profile(customer_id, portfolio.estimated_value_cop)
 
     @app.get("/accounts/by-identity/{provider}/{provider_user_id}/portfolio", response_model=PortfolioResponse)
     def get_account_portfolio_by_identity(provider: str, provider_user_id: str) -> PortfolioResponse:

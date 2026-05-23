@@ -884,3 +884,41 @@ def test_admin_expired_orders_show_expiration_time_not_mark_time(tmp_path) -> No
     assert main_date.startswith("2026-")
     assert secondary_label == "Marcada"
     assert secondary_date == expired_order.updated_at
+
+
+def test_account_credit_profile_scores_customer_and_suggests_credit_limit(tmp_path) -> None:
+    client = make_client_with_coinsenda(tmp_path, AcceptedCoinsendaClient())
+    account = client.post(
+        "/accounts/identify",
+        json={"provider": "telegram", "provider_user_id": "credit-1", "display_name": "Credito Uno"},
+    ).json()
+    order = client.post(
+        "/orders",
+        json={"client_id": "telegram:credit-1", "customer_id": account["customer_id"], "amount_cop_gross": 120000},
+    ).json()
+    client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60})
+    client.post(f"/orders/{order['external_id']}/reconcile-payment")
+
+    profile = client.get(f"/accounts/{account['customer_id']}/credit-profile").json()
+
+    assert profile["customer_id"] == account["customer_id"]
+    assert profile["paid_orders"] == 1
+    assert profile["rating"] in {"C", "B", "A"}
+    assert profile["score"] >= 40
+    assert profile["suggested_credit_limit_cop"] > 0
+    assert profile["max_ltv_percent"] > 0
+
+
+def test_admin_account_detail_shows_credit_profile(tmp_path) -> None:
+    client = make_client(tmp_path)
+    account = client.post(
+        "/accounts/identify",
+        json={"provider": "telegram", "provider_user_id": "credit-admin", "display_name": "Credito Admin"},
+    ).json()
+
+    response = client.get(f"/admin/accounts/{account['customer_id']}")
+
+    assert response.status_code == 200
+    assert "Perfil crediticio interno" in response.text
+    assert "Cupo sugerido" in response.text
+    assert "Score" in response.text

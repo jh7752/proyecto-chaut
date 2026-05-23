@@ -252,6 +252,7 @@ def admin_account_detail(store: OrderStore, customer_id: str, token: str | None 
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
     portfolio = store.get_portfolio(customer_id)
+    credit = store.get_credit_profile(customer_id)
     entries = "".join(
         f"<tr><td class='date'>{format_bogota_time(entry.created_at)}</td><td><a class='order-id' href='/admin/orders/{escape(entry.external_id)}{_token_qs(token)}'><code>{escape(entry.external_id)}</code></a></td><td class='money'>{entry.cop_gross:,.0f}</td><td>{entry.usdt_spent:.12f}</td><td>{entry.amount:.18f}</td><td>{entry.gold_grams:.12f}</td></tr>"
         for entry in portfolio.entries
@@ -262,8 +263,14 @@ def admin_account_detail(store: OrderStore, customer_id: str, token: str | None 
       {metric_card("COP invertido", f"{portfolio.cop_invested:,.0f}")}
       {metric_card("XAUT neto", f"{portfolio.xaut_net:.18f}")}
       {metric_card("Gramos oro", f"{portfolio.gold_grams_net:.12f}")}
+      {metric_card("Rating", credit.rating)}
+      {metric_card("Score", f"{credit.score}/100")}
+      {metric_card("Cupo sugerido", f"{credit.suggested_credit_limit_cop:,.0f} COP")}
     </div></section>
-    <div class="card"><p><b>Usuario:</b> <code>{escape(account.customer_id)}</code></p><p><b>Nombre:</b> {escape(account.display_name or '-')}</p><ul class="clean">{identities}</ul></div>
+    <div class="split">
+      <div class="card"><p><b>Usuario:</b> <code>{escape(account.customer_id)}</code></p><p><b>Nombre:</b> {escape(account.display_name or '-')}</p><ul class="clean">{identities}</ul></div>
+      <div class="card"><p class="muted">Perfil crediticio interno</p><p><b>LTV max:</b> {credit.max_ltv_percent:.0f}%</p><p><b>Garantia referencia:</b> {credit.collateral_value_cop:,.0f} COP</p><p><b>Ordenes:</b> {credit.paid_orders} pagadas / {credit.unpaid_orders} no pagadas / {credit.expired_orders} expiradas</p><ul class="clean">{''.join(f'<li>{escape(reason)}</li>' for reason in credit.reasons)}</ul></div>
+    </div>
     <div class="section-head"><h2>Ledger</h2><span class="badge">{portfolio.entries_count} movimientos</span></div><div class="table-wrap"><table><tr><th>Fecha</th><th>Orden</th><th>COP</th><th>USDT</th><th>XAUT</th><th>Gramos</th></tr>{entries}</table></div>
     """
     return render_admin("Usuario", body, token)

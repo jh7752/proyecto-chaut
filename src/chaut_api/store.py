@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
 
-from .models import AccountIdentityRequest, AccountIdentityResponse, AccountResponse, EventResponse, LedgerEntryResponse, OrderResponse, PortfolioResponse
+from .models import AccountIdentityRequest, AccountIdentityResponse, AccountResponse, CreditProfileResponse, EventResponse, LedgerEntryResponse, OrderResponse, PortfolioResponse
 
 
 class OrderStore(Protocol):
@@ -33,6 +33,7 @@ class OrderStore(Protocol):
     def create_ledger_entry(self, order: OrderResponse, fill: dict, payload: dict) -> LedgerEntryResponse: ...
     def get_ledger_entry_for_order(self, external_id: str) -> LedgerEntryResponse | None: ...
     def get_portfolio(self, customer_id: str) -> PortfolioResponse: ...
+    def get_credit_profile(self, customer_id: str, collateral_value_cop: float | None = None) -> CreditProfileResponse: ...
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse: ...
     def list_events(self, entity_id: str) -> list[EventResponse]: ...
 
@@ -514,6 +515,67 @@ class SqliteOrderStore:
             cop_invested=round(sum(entry.cop_gross for entry in entries), 2),
             entries_count=len(entries),
             entries=entries,
+        )
+
+    def get_credit_profile(self, customer_id: str, collateral_value_cop: float | None = None) -> CreditProfileResponse:
+        account = self.get_account(customer_id)
+        if account is None:
+            raise ValueError("Account not found")
+        portfolio = self.get_portfolio(customer_id)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT payment_status, conversion_status, amount_cop_gross FROM orders
+                WHERE customer_id = ?
+                """,
+                (customer_id,),
+            ).fetchall()
+        paid_orders = sum(1 for row in rows if row["payment_status"] == "confirmed")
+        expired_orders = sum(1 for row in rows if row["payment_status"] == "expired")
+        unpaid_orders = sum(1 for row in rows if row["payment_status"] != "confirmed")
+        identities_count = len(account.identities)
+        collateral = float(collateral_value_cop if collateral_value_cop is not None else portfolio.estimated_value_cop or portfolio.cop_invested)
+        score = 20
+        reasons = ["Base inicial por cuenta creada"]
+        activity_count = max(portfolio.entries_count, paid_orders)
+        if activity_count:
+            score += min(activity_count * 8, 24)
+            reasons.append(f"{activity_count} pagos confirmados o movimientos settled")
+        paid_volume = sum(float(row["amount_cop_gross"] or 0) for row in rows if row["payment_status"] == "confirmed")
+        collateral_base = max(portfolio.cop_invested, paid_volume)
+        if collateral_base:
+            score += min(int(collateral_base // 50000) * 4, 20)
+            reasons.append(f"{collateral_base:,.0f} COP confirmados")
+        collateral = max(collateral, collateral_base)
+        if collateral > 0:
+            score += 6
+            reasons.append("Saldo o pago confirmado disponible como referencia de garantia")
+        if identities_count > 1:
+            score += 6
+            reasons.append("Multiples identidades vinculadas")
+        if expired_orders:
+            penalty = min(expired_orders * 5, 20)
+            score -= penalty
+            reasons.append(f"{expired_orders} ordenes expiradas descuentan {penalty} puntos")
+        if unpaid_orders and not paid_orders:
+            score -= 8
+            reasons.append("Tiene ordenes sin pago confirmado")
+        score = max(0, min(100, score))
+        rating = "nuevo" if paid_orders == 0 else "A" if score >= 80 else "B" if score >= 60 else "C" if score >= 40 else "D"
+        max_ltv = 0.0 if rating == "nuevo" else 0.5 if rating == "A" else 0.4 if rating == "B" else 0.25 if rating == "C" else 0.0
+        suggested_limit = int((collateral * max_ltv) // 1000 * 1000)
+        return CreditProfileResponse(
+            customer_id=customer_id,
+            score=score,
+            rating=rating,
+            suggested_credit_limit_cop=max(suggested_limit, 0),
+            max_ltv_percent=max_ltv * 100,
+            collateral_value_cop=round(collateral, 2),
+            paid_orders=paid_orders,
+            unpaid_orders=unpaid_orders,
+            expired_orders=expired_orders,
+            identities_count=identities_count,
+            reasons=reasons,
         )
 
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse:
