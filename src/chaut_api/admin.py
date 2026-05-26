@@ -200,6 +200,20 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; }}
     .card {{ position:relative; background:var(--paper-soft); border:1px solid var(--line); border-radius:20px; padding:18px; box-shadow:var(--soft-shadow); backdrop-filter:blur(12px); overflow:hidden; }}
     .card:after {{ content:""; position:absolute; inset:auto 14px 0; height:2px; background:linear-gradient(90deg,transparent,var(--gold-2),transparent); opacity:.45; }}
+    .premium-hero {{ display:grid; grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr); gap:18px; align-items:stretch; }}
+    .command-card {{ min-height:260px; padding:26px; display:flex; flex-direction:column; justify-content:space-between; background:linear-gradient(135deg,rgba(26,26,46,.96),rgba(42,42,74,.92)); color:#fff; border:0; }}
+    .command-card:after {{ display:none; }}
+    .command-card .eyebrow,.command-card .muted {{ color:rgba(247,228,160,.82); }}
+    .command-card h2 {{ margin:12px 0 10px; font-size:clamp(34px,5vw,58px); line-height:.92; letter-spacing:-.055em; }}
+    .command-actions {{ display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }}
+    .command-actions a {{ color:#1a1a2e; background:#f7e4a0; border-radius:14px; padding:11px 14px; text-decoration:none; box-shadow:0 10px 28px rgba(0,0,0,.18); }}
+    .mini-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }}
+    .signal-card {{ min-height:123px; background:rgba(255,255,255,.72); }}
+    [data-theme="dark"] .signal-card {{ background:rgba(255,255,255,.07); }}
+    .signal-value {{ display:block; margin-top:8px; font-size:30px; font-weight:850; letter-spacing:-.05em; }}
+    .health-strip {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:14px; }}
+    .health-item {{ border:1px solid var(--line); border-radius:16px; padding:12px; background:rgba(255,255,255,.58); }}
+    [data-theme="dark"] .health-item {{ background:rgba(255,255,255,.06); }}
     .metric-card {{ min-height:132px; display:grid; align-content:space-between; gap:14px; }}
     .metric-top {{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }}
     .metric-icon {{ display:grid; place-items:center; width:42px; height:42px; border-radius:12px; color:var(--gold); background:rgba(212,168,83,.1); box-shadow:inset 0 0 0 1px rgba(212,168,83,.15); }}
@@ -258,6 +272,20 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     [data-theme="dark"] .order-time {{ color:#9898b8; }}
     .orders-split {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; align-items:start; }}
     .orders-panel {{ min-width:0; }}
+    .account-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }}
+    .account-card {{ display:grid; gap:14px; min-height:220px; text-decoration:none; color:var(--ink); }}
+    .account-card:hover {{ transform:translateY(-2px); border-color:rgba(212,168,83,.34); box-shadow:0 18px 46px rgba(42,45,62,.12); }}
+    .account-head {{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }}
+    .avatar {{ width:46px; height:46px; border-radius:15px; display:grid; place-items:center; color:#fff; font-weight:850; background:linear-gradient(135deg,var(--leaf),var(--gold)); box-shadow:0 12px 28px rgba(58,125,94,.18); }}
+    .account-name {{ margin:0; font-size:20px; letter-spacing:-.035em; }}
+    .account-stats {{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }}
+    .account-stat {{ border:1px solid var(--line); border-radius:14px; padding:10px; background:rgba(255,255,255,.52); }}
+    [data-theme="dark"] .account-stat {{ background:rgba(255,255,255,.06); }}
+    .account-stat b {{ display:block; margin-top:4px; font-size:18px; }}
+    .rating-badge {{ display:inline-flex; align-items:center; justify-content:center; min-width:44px; height:44px; border-radius:14px; padding:0 12px; font-weight:900; color:#1a1a2e; background:linear-gradient(135deg,#f7e4a0,#d4a853); }}
+    .rating-new {{ background:#f0eef5; color:#8888a0; }}
+    .score-bar {{ height:9px; border-radius:999px; overflow:hidden; background:rgba(42,45,62,.08); }}
+    .score-bar span {{ display:block; height:100%; width:calc(var(--score) * 1%); border-radius:inherit; background:linear-gradient(90deg,var(--leaf),var(--gold)); }}
     .orders-panel .section-head {{ margin:0 0 10px; }}
     .split {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.45fr); gap:16px; align-items:start; }}
     .profile-tabs {{ margin-top:14px; display:grid; gap:14px; }}
@@ -270,6 +298,8 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     .credit-card {{ display:grid; grid-template-columns:minmax(140px,.45fr) minmax(0,1fr); gap:16px; align-items:center; }}
     .score-ring {{ width:132px; height:132px; border-radius:50%; display:grid; place-items:center; margin:auto; background:conic-gradient(var(--gold) calc(var(--score) * 1%), rgba(94,168,130,.12) 0); box-shadow:inset 0 0 0 12px rgba(255,255,255,.92), var(--soft-shadow); }}
     [data-theme="dark"] .score-ring {{ box-shadow:inset 0 0 0 12px rgba(22,22,42,.94), var(--soft-shadow); }}
+    .score-ring span {{ font-size:13px; color:#8888a0; }}
+    .score-content {{ display:grid; place-items:center; line-height:1; }}
     .score-ring strong {{ font-size:34px; letter-spacing:-.06em; }}
     .kv-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }}
     .kv {{ border:1px solid var(--line); border-radius:14px; padding:11px 12px; background:rgba(255,255,255,.6); }}
@@ -290,11 +320,12 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
       .shell {{ width:min(100% - 22px,1180px); }}
       header {{ align-items:start; grid-template-columns:1fr; padding-top:22px; }}
       .statusbar {{ justify-content:flex-start; }}
-      .split,.orders-split,.credit-card {{ grid-template-columns:1fr; }}
+      .split,.orders-split,.credit-card,.premium-hero {{ grid-template-columns:1fr; }}
       table {{ min-width:720px; }} th,td {{ padding:12px; }}
       .order-card {{ grid-template-columns:1fr; padding:14px 14px 14px 40px; }}
       .order-money {{ text-align:left; }}
       .tab-nav {{ border-radius:22px; width:100%; }}
+      .mini-grid {{ grid-template-columns:1fr; }}
     }}
     @media print {{
       .sidebar,.mobile-topbar,.statusbar,.site-footer {{ display:none !important; }}
@@ -359,21 +390,30 @@ def admin_dashboard(store: OrderStore, token: str | None = None) -> HTMLResponse
     expired = sum(1 for order in active_orders if order.payment_status in EXPIRED_STATES)
     settled = sum(1 for order in active_orders if order.conversion_status in SETTLED_STATES)
     body = f"""
-    <section class="hero">
-      <div class="grid">
-        {metric_card("Usuarios", len(accounts))}
-        {metric_card("Ordenes activas", len(active_orders))}
-        {metric_card("Pendientes pago", pending)}
-        {metric_card("Expiradas", expired)}
-        {metric_card("Atencion", len(attention_orders))}
-        {metric_card("Settled", settled)}
-        {metric_card("COP invertido", f"{total_cop:,.0f}")}
+    <section class="premium-hero">
+      <div class="card command-card">
+        <div>
+          <p class="eyebrow">Centro operativo</p>
+          <h2>{total_cop:,.0f} COP custodiados</h2>
+          <p class="muted">Vista ejecutiva de Chaut: usuarios, ordenes, credito y oro digital en una sola consola.</p>
+        </div>
+        <div class="command-actions">
+          <a href="/admin/orders{_token_qs(token)}">Revisar ordenes</a>
+          <a href="/admin/accounts{_token_qs(token)}">Ver usuarios</a>
+        </div>
+      </div>
+      <div class="mini-grid">
+        <div class="card signal-card"><span class="muted">Atencion operativa</span><span class="signal-value bad">{len(attention_orders)}</span><p class="muted">Ordenes que necesitan revision.</p></div>
+        <div class="card signal-card"><span class="muted">Settled</span><span class="signal-value ok">{settled}</span><p class="muted">Compras listas en ledger.</p></div>
+        <div class="card signal-card"><span class="muted">Usuarios</span><span class="signal-value">{len(accounts)}</span><p class="muted">Cuentas identificadas.</p></div>
+        <div class="card signal-card"><span class="muted">Pendientes</span><span class="signal-value warn">{pending}</span><p class="muted">Pagos por confirmar.</p></div>
       </div>
     </section>
-    <section class="grid">
-      <div class="card"><div class="muted">XAUT neto custodiado</div><div class="metric">{total_xaut:.18f}</div><p class="muted">Basado en ledger, no en ordenes de prueba.</p></div>
-      <div class="card"><div class="muted">Oro digital acreditado</div><div class="metric">{total_grams:.12f} g</div><p class="muted">Suma de compras settled con ledger entry.</p></div>
-      <div class="card"><div class="muted">Movimientos reales</div><div class="metric">{total_entries}</div><p class="muted">Solo compras con ledger entry suman al saldo.</p></div>
+    <section class="health-strip">
+      <div class="health-item"><span class="muted">XAUT neto</span><b>{total_xaut:.8f}</b></div>
+      <div class="health-item"><span class="muted">Oro digital</span><b>{total_grams:.8f} g</b></div>
+      <div class="health-item"><span class="muted">Movimientos reales</span><b>{total_entries}</b></div>
+      <div class="health-item"><span class="muted">Expiradas</span><b>{expired}</b></div>
     </section>
     <div class="section-head"><h2>Ultimas ordenes</h2><span class="badge">Resumen rapido</span></div>
     {split_orders_timeline(store, active_orders, token)}
@@ -434,18 +474,32 @@ def admin_order_detail(
 
 
 def admin_accounts(store: OrderStore, token: str | None = None) -> HTMLResponse:
+    cards = []
     rows = []
     for account in store.list_accounts(200):
         portfolio = store.get_portfolio(account.customer_id)
+        credit = store.get_credit_profile(account.customer_id)
+        initials = (account.display_name or account.customer_id or "U")[:2].upper()
+        rating_class = "rating-new" if credit.rating == "nuevo" else ""
+        href = f"/admin/accounts/{escape(account.customer_id)}{_token_qs(token)}"
+        cards.append(
+            f'<a class="card account-card" href="{href}">'
+            f'<div class="account-head"><div><div class="avatar">{escape(initials)}</div><p class="account-name">{escape(account.display_name or account.customer_id)}</p><span class="muted"><code>{escape(account.customer_id)}</code></span></div><span class="rating-badge {rating_class}">{escape(credit.rating)}</span></div>'
+            f'<div class="score-bar" style="--score:{credit.score}"><span></span></div>'
+            f'<div class="account-stats"><div class="account-stat"><span class="muted">Score</span><b>{credit.score}/100</b></div><div class="account-stat"><span class="muted">Cupo</span><b>{credit.suggested_credit_limit_cop:,.0f}</b></div><div class="account-stat"><span class="muted">COP</span><b>{portfolio.cop_invested:,.0f}</b></div><div class="account-stat"><span class="muted">LTV max</span><b>{credit.max_ltv_percent:.0f}%</b></div></div>'
+            "</a>"
+        )
         rows.append(
-            f"<tr><td><a class='order-id' href='/admin/accounts/{escape(account.customer_id)}{_token_qs(token)}'><code>{escape(account.customer_id)}</code></a></td>"
+            f"<tr><td><a class='order-id' href='{href}'><code>{escape(account.customer_id)}</code></a></td>"
             f"<td>{escape(account.display_name or '-')}</td><td>{portfolio.entries_count}</td><td class='money'>{portfolio.cop_invested:,.0f}</td>"
-            f"<td>{portfolio.xaut_net:.18f}</td><td>{portfolio.gold_grams_net:.12f}</td></tr>"
+            f"<td>{credit.score}</td><td>{escape(credit.rating)}</td><td class='money'>{credit.suggested_credit_limit_cop:,.0f}</td><td>{credit.max_ltv_percent:.0f}%</td></tr>"
         )
     body = (
-        "<div class='table-wrap'><table><tr><th>Usuario</th><th>Nombre</th><th>Movs</th><th>COP</th><th>XAUT</th><th>Gramos</th></tr>"
+        "<section class='account-grid'>" + "".join(cards) + "</section>"
+        "<div class='section-head'><h2>Tabla completa</h2><span class='badge'>Credito y saldos</span></div>"
+        "<div class='table-wrap'><table><thead><tr><th>Usuario</th><th>Nombre</th><th>Movs</th><th>COP</th><th>Score</th><th>Rating</th><th>Cupo</th><th>LTV</th></tr></thead><tbody>"
         + "".join(rows)
-        + "</table></div>"
+        + "</tbody></table></div>"
     )
     return render_admin("Usuarios", body, token)
 
@@ -482,10 +536,11 @@ def admin_account_detail(
         <p class="muted">Canales vinculados</p><ul class="clean">{identities}</ul>
       </div>
       <div id="credito" class="profile-panel card credit-card">
-        <div class="score-ring" style="--score:{credit.score}"><strong>{credit.score}</strong><span>/100</span></div>
+        <div class="score-ring" style="--score:{credit.score}"><div class="score-content"><strong>{credit.score}</strong><span>/100</span></div></div>
         <div>
-          <div class="section-head"><h2>Perfil crediticio interno</h2><span class="badge">Rating {escape(credit.rating)}</span></div>
-          <div class="kv-grid"><div class="kv"><span class="muted">Cupo sugerido</span><b>{credit.suggested_credit_limit_cop:,.0f} COP</b></div><div class="kv"><span class="muted">LTV max</span><b>{credit.max_ltv_percent:.0f}%</b></div><div class="kv"><span class="muted">Garantia referencia</span><b>{credit.collateral_value_cop:,.0f} COP</b></div><div class="kv"><span class="muted">Ordenes</span><b>{credit.paid_orders} / {credit.unpaid_orders} / {credit.expired_orders}</b></div></div>
+          <div class="section-head"><h2>Perfil crediticio interno</h2><span class="rating-badge {"rating-new" if credit.rating == "nuevo" else ""}">{escape(credit.rating)}</span></div>
+          <p class="muted">Calificacion operativa para prestamos con colateral en oro digital. Combina actividad, pagos confirmados, colateral y alertas historicas.</p>
+          <div class="kv-grid"><div class="kv"><span class="muted">Cupo sugerido</span><b>{credit.suggested_credit_limit_cop:,.0f} COP</b></div><div class="kv"><span class="muted">LTV max</span><b>{credit.max_ltv_percent:.0f}%</b></div><div class="kv"><span class="muted">Garantia referencia</span><b>{credit.collateral_value_cop:,.0f} COP</b></div><div class="kv"><span class="muted">Ordenes</span><b>{credit.paid_orders} pagadas · {credit.unpaid_orders} no pagadas · {credit.expired_orders} expiradas</b></div></div>
           <ul class="reason-list">{reasons}</ul>
         </div>
       </div>
