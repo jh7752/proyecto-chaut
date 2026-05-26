@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from html import escape
+import hmac
+import secrets
 
-from fastapi import HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .store import OrderStore
 
@@ -17,6 +19,83 @@ ATTENTION_CONVERSION_STATES = {"executing", "submitted"}
 def require_admin(request: Request, token: str | None) -> None:
     if token and request.query_params.get("token") != token and request.headers.get("x-admin-token") != token:
         raise HTTPException(status_code=401, detail="Admin token required")
+
+
+def is_admin_session(request: Request, session_secret: str | None) -> bool:
+    if not session_secret:
+        return False
+    cookie = request.cookies.get("chaut_admin_session")
+    return bool(cookie) and hmac.compare_digest(cookie, session_secret)
+
+
+def require_admin_login(request: Request, session_secret: str | None) -> None:
+    if not is_admin_session(request, session_secret):
+        raise HTTPException(status_code=401, detail="Admin login required")
+
+
+def admin_login_page(error: str | None = None) -> HTMLResponse:
+    error_html = f'<p class="error">{escape(error)}</p>' if error else ""
+    return HTMLResponse(f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login - Chaut Admin</title>
+  <style>
+    :root {{ --ink:#182117; --leaf:#31543e; --gold:#bd8a32; --cream:#fbf5df; --line:rgba(49,84,62,.18); }}
+    * {{ box-sizing:border-box; }}
+    body {{ min-height:100vh; margin:0; display:grid; place-items:center; color:var(--ink); font-family:Georgia,'Times New Roman',serif; background:radial-gradient(circle at 20% 12%,#ffe6a1,transparent 30%),radial-gradient(circle at 88% 4%,#c7e0b4,transparent 28%),linear-gradient(135deg,#fbf4dc,#dfe8d4); }}
+    .card {{ width:min(420px,calc(100% - 28px)); border:1px solid var(--line); border-radius:28px; padding:28px; background:rgba(255,252,240,.82); box-shadow:0 24px 80px rgba(26,47,31,.16); backdrop-filter:blur(10px); }}
+    .eyebrow {{ color:var(--gold); text-transform:uppercase; letter-spacing:.16em; font-size:12px; font-weight:700; margin:0 0 10px; }}
+    h1 {{ margin:0 0 8px; font-size:42px; letter-spacing:-.06em; line-height:.92; }}
+    p {{ color:var(--leaf); }}
+    label {{ display:block; margin:14px 0 6px; color:var(--leaf); font-weight:700; }}
+    input {{ width:100%; border:1px solid var(--line); border-radius:14px; padding:13px 14px; font:inherit; background:white; }}
+    button {{ width:100%; margin-top:18px; border:0; border-radius:999px; padding:13px 16px; color:#fff; background:linear-gradient(135deg,var(--leaf),#1f3b2b); font:inherit; font-weight:700; cursor:pointer; }}
+    .error {{ color:#b24a36; font-weight:700; }}
+  </style>
+</head>
+<body>
+  <form class="card" method="post" action="/login">
+    <p class="eyebrow">Chaut Admin</p>
+    <h1>Acceso operativo</h1>
+    <p>Panel privado para controlar ahorros en oro digital.</p>
+    {error_html}
+    <label for="username">Usuario</label>
+    <input id="username" name="username" autocomplete="username" required autofocus>
+    <label for="password">Clave</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Entrar</button>
+  </form>
+</body>
+</html>""")
+
+
+def create_admin_session_response(session_secret: str, redirect_to: str = "/admin") -> Response:
+    response = RedirectResponse(redirect_to, status_code=303)
+    response.set_cookie(
+        "chaut_admin_session",
+        session_secret,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=60 * 60 * 12,
+    )
+    return response
+
+
+def clear_admin_session_response() -> Response:
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie("chaut_admin_session")
+    return response
+
+
+def valid_admin_credentials(
+    username: str, password: str, expected_username: str | None, expected_password: str | None
+) -> bool:
+    if not expected_username or not expected_password:
+        return False
+    return secrets.compare_digest(username, expected_username) and secrets.compare_digest(password, expected_password)
 
 
 def render_admin(title: str, body: str, token: str | None = None) -> HTMLResponse:
@@ -150,7 +229,7 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
       <div class="brand"><div class="mark">Au</div><div><p class="eyebrow">Chaut Admin</p><h1>{escape(title)}</h1><p class="subtitle">Control operativo de ahorros en oro digital</p></div></div>
       <div class="statusbar"><div class="badge">HTX activo</div><div class="badge">Bre-B / Coinsenda</div></div>
     </header>
-    <nav><a href="/admin{token_qs}">Dashboard</a><a href="/admin/orders{token_qs}">Ordenes</a><a href="/admin/accounts{token_qs}">Usuarios</a></nav>
+    <nav><a href="/admin{token_qs}">Dashboard</a><a href="/admin/orders{token_qs}">Ordenes</a><a href="/admin/accounts{token_qs}">Usuarios</a><a href="/logout">Salir</a></nav>
     <main>{body}</main>
   </div>
 </body>

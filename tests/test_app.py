@@ -923,3 +923,24 @@ def test_admin_account_detail_shows_credit_profile(tmp_path) -> None:
     assert "Cupo sugerido" in response.text
     assert "score-ring" in response.text
     assert "Ledger" in response.text
+
+
+def test_admin_login_protects_dashboard(tmp_path) -> None:
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'test.db'}",
+        admin_username="admin",
+        admin_password="secret-pass",
+        admin_session_secret="session-secret",
+    )
+    client = TestClient(create_app(settings=settings), follow_redirects=False)
+
+    blocked = client.get("/admin")
+    assert blocked.status_code == 401
+
+    login = client.post("/login", data={"username": "admin", "password": "secret-pass"})
+    assert login.status_code == 303
+    assert login.headers["location"] == "/admin"
+
+    allowed = client.get("/admin")
+    assert allowed.status_code == 200
+    assert "Chaut Admin" in allowed.text

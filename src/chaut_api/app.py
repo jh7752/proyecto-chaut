@@ -1,9 +1,21 @@
 from datetime import UTC, datetime, timedelta
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from .admin import admin_account_detail, admin_accounts, admin_dashboard, admin_order_detail, admin_orders, require_admin
+from .admin import (
+    admin_account_detail,
+    admin_accounts,
+    admin_dashboard,
+    admin_login_page,
+    admin_order_detail,
+    admin_orders,
+    clear_admin_session_response,
+    create_admin_session_response,
+    require_admin,
+    require_admin_login,
+    valid_admin_credentials,
+)
 from .trm import get_seticap_trm
 from .htx import (
     create_htx_client,
@@ -186,23 +198,45 @@ def create_app(
         return {"marked_count": len(marked), "marked": marked}
 
 
+    def require_admin_access(request: Request) -> str | None:
+        if settings.admin_username and settings.admin_password:
+            require_admin_login(request, settings.admin_session_secret)
+            return None
+        require_admin(request, settings.admin_token)
+        return request.query_params.get("token")
+
+    @app.get("/login")
+    def login_page():
+        return admin_login_page()
+
+    @app.post("/login")
+    def login(username: str = Form(...), password: str = Form(...)):
+        if not valid_admin_credentials(username, password, settings.admin_username, settings.admin_password):
+            return admin_login_page("Usuario o clave incorrectos")
+        if not settings.admin_session_secret:
+            raise HTTPException(status_code=500, detail="Admin session secret is not configured")
+        return create_admin_session_response(settings.admin_session_secret)
+
+    @app.get("/logout")
+    def logout():
+        return clear_admin_session_response()
 
     @app.get("/admin")
     def admin_home(request: Request):
         expire_stale_payment_requests()
-        require_admin(request, settings.admin_token)
-        return admin_dashboard(store, request.query_params.get("token"))
+        token = require_admin_access(request)
+        return admin_dashboard(store, token)
 
     @app.get("/admin/orders")
     def admin_orders_page(request: Request):
         expire_stale_payment_requests()
-        require_admin(request, settings.admin_token)
-        return admin_orders(store, request.query_params.get("token"))
+        token = require_admin_access(request)
+        return admin_orders(store, token)
 
     @app.get("/admin/orders/{external_id}")
     def admin_order_page(external_id: str, request: Request):
-        require_admin(request, settings.admin_token)
-        return admin_order_detail(store, external_id, request.query_params.get("token"))
+        token = require_admin_access(request)
+        return admin_order_detail(store, external_id, token)
 
     def _admin_redirect(external_id: str, token: str | None, redirect: str = "detail") -> RedirectResponse:
         path = f"/admin/orders/{external_id}" if redirect == "detail" else "/admin/orders"
@@ -211,25 +245,25 @@ def create_app(
 
     @app.post("/admin/orders/{external_id}/reconcile")
     def admin_reconcile_order(external_id: str, request: Request, redirect: str = "detail"):
-        require_admin(request, settings.admin_token)
+        token = require_admin_access(request)
         reconcile_payment(external_id)
-        return _admin_redirect(external_id, request.query_params.get("token"), redirect)
+        return _admin_redirect(external_id, token, redirect)
 
     @app.post("/admin/orders/{external_id}/prepare-xaut")
     def admin_prepare_xaut_order(external_id: str, request: Request, redirect: str = "detail"):
-        require_admin(request, settings.admin_token)
+        token = require_admin_access(request)
         prepare_xaut_order(external_id)
-        return _admin_redirect(external_id, request.query_params.get("token"), redirect)
+        return _admin_redirect(external_id, token, redirect)
 
     @app.post("/admin/orders/{external_id}/settle-xaut")
     def admin_settle_xaut_order(external_id: str, request: Request, confirm: str = "", redirect: str = "detail"):
-        require_admin(request, settings.admin_token)
+        token = require_admin_access(request)
         settle_xaut_after_payment(external_id, confirm)
-        return _admin_redirect(external_id, request.query_params.get("token"), redirect)
+        return _admin_redirect(external_id, token, redirect)
 
     @app.post("/admin/orders/{external_id}/mark-attention")
     def admin_mark_attention_order(external_id: str, request: Request, redirect: str = "detail"):
-        require_admin(request, settings.admin_token)
+        token = require_admin_access(request)
         order = store.get_order(external_id)
         if order is None:
             raise HTTPException(status_code=404, detail="Order not found")
@@ -238,17 +272,17 @@ def create_app(
             "admin.attention_marked",
             {"reason": "manual_review", "marked_at": datetime.now(UTC).isoformat()},
         )
-        return _admin_redirect(external_id, request.query_params.get("token"), redirect)
+        return _admin_redirect(external_id, token, redirect)
 
     @app.get("/admin/accounts")
     def admin_accounts_page(request: Request):
-        require_admin(request, settings.admin_token)
-        return admin_accounts(store, request.query_params.get("token"))
+        token = require_admin_access(request)
+        return admin_accounts(store, token)
 
     @app.get("/admin/accounts/{customer_id}")
     def admin_account_page(customer_id: str, request: Request):
-        require_admin(request, settings.admin_token)
-        return admin_account_detail(store, customer_id, request.query_params.get("token"))
+        token = require_admin_access(request)
+        return admin_account_detail(store, customer_id, token)
 
     @app.post("/accounts/identify", response_model=AccountResponse)
     def identify_account(payload: AccountIdentityRequest) -> AccountResponse:

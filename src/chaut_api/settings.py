@@ -20,3 +20,6 @@ class Settings(BaseSettings):
     htx_worker_instance_id: str | None = Field(default=None)
     htx_worker_region: str = Field(default="ap-south-1")
     admin_token: str | None = Field(default=None)
+    admin_username: str | None = Field(default=None)
+    admin_password: str | None = Field(default=None)
+    admin_session_secret: str | None = Field(default=None)

@@ -8,6 +8,9 @@ services:
       CHAUT_FEE_PERCENT: "0.5"
       CHAUT_DATABASE_URL: sqlite:////data/chaut.db
       CHAUT_ADMIN_TOKEN: ${CHAUT_ADMIN_TOKEN:-}
+      CHAUT_ADMIN_USERNAME: ${CHAUT_ADMIN_USERNAME:-}
+      CHAUT_ADMIN_PASSWORD: ${CHAUT_ADMIN_PASSWORD:-}
+      CHAUT_ADMIN_SESSION_SECRET: ${CHAUT_ADMIN_SESSION_SECRET:-}
       CHAUT_COINSENDA_MODE: script
       CHAUT_COINSENDA_RUNTIME_DIR: /app/vendor/coinsenda
       CHAUT_KUCOIN_WORKER_INSTANCE_ID: ${CHAUT_KUCOIN_WORKER_INSTANCE_ID:-}
@@ -23,10 +26,24 @@ services:
       KUCOIN_API_PASSPHRASE: ${KUCOIN_API_PASSPHRASE:-}
       KUCOIN_API_KEY_VERSION: ${KUCOIN_API_KEY_VERSION:-2}
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
-    ports:
-      - "80:8000"
+    expose:
+      - "8000"
     volumes:
       - chaut_data:/data
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: chaut-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
 
   bot:
     build: .
@@ -41,3 +58,5 @@ services:
 
 volumes:
   chaut_data:
+  caddy_data:
+  caddy_config:
