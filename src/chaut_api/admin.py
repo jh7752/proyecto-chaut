@@ -214,6 +214,12 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     .health-strip {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:14px; }}
     .health-item {{ border:1px solid var(--line); border-radius:16px; padding:12px; background:rgba(255,255,255,.58); }}
     [data-theme="dark"] .health-item {{ background:rgba(255,255,255,.06); }}
+    .revenue-card {{ background:linear-gradient(135deg,rgba(247,228,160,.82),rgba(255,255,255,.86)); border-color:rgba(212,168,83,.34); }}
+    [data-theme="dark"] .revenue-card {{ background:linear-gradient(135deg,rgba(212,168,83,.18),rgba(255,255,255,.06)); }}
+    .revenue-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-top:12px; }}
+    .revenue-kpi {{ border:1px solid rgba(212,168,83,.28); border-radius:16px; padding:12px; background:rgba(255,255,255,.48); }}
+    [data-theme="dark"] .revenue-kpi {{ background:rgba(255,255,255,.06); }}
+    .revenue-kpi b {{ display:block; margin-top:5px; font-size:24px; letter-spacing:-.045em; overflow-wrap:anywhere; }}
     .metric-card {{ min-height:132px; display:grid; align-content:space-between; gap:14px; }}
     .metric-top {{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }}
     .metric-icon {{ display:grid; place-items:center; width:42px; height:42px; border-radius:12px; color:var(--gold); background:rgba(212,168,83,.1); box-shadow:inset 0 0 0 1px rgba(212,168,83,.15); }}
@@ -384,6 +390,7 @@ def admin_dashboard(store: OrderStore, token: str | None = None) -> HTMLResponse
         total_entries += portfolio.entries_count
     active_orders = [order for order in orders if order.conversion_status not in LEGACY_STATES]
     attention_orders = [order for order in active_orders if needs_attention(order)]
+    revenue = commission_summary(store)
     pending = sum(
         1 for order in active_orders if order.payment_status not in {"confirmed", "expired"}
     )
@@ -415,6 +422,18 @@ def admin_dashboard(store: OrderStore, token: str | None = None) -> HTMLResponse
       <div class="health-item"><span class="muted">Movimientos reales</span><b>{total_entries}</b></div>
       <div class="health-item"><span class="muted">Expiradas</span><b>{expired}</b></div>
     </section>
+    <section class="card revenue-card">
+      <div class="section-head"><h2>Ingresos Chaut en XAUT</h2><span class="badge">{revenue["paid_count"]} compras con comision</span></div>
+      <p class="muted">Comision/spread acumulado despues del cambio: el usuario paga COP completo y Chaut toma su ingreso al final en oro digital.</p>
+      <div class="revenue-grid">
+        <div class="revenue-kpi"><span class="muted">XAUT Chaut</span><b>{revenue["chaut_spread_xaut"]:.18f}</b></div>
+        <div class="revenue-kpi"><span class="muted">Oro equivalente</span><b>{revenue["chaut_spread_gold_grams"]:.12f} g</b></div>
+        <div class="revenue-kpi"><span class="muted">Fees HTX pagados</span><b>{revenue["exchange_fee_xaut"]:.18f}</b></div>
+        <div class="revenue-kpi"><span class="muted">Ordenes liquidadas</span><b>{revenue["settled_count"]}</b></div>
+      </div>
+    </section>
+    <div class="section-head"><h2>Comisiones por orden</h2><span class="badge">Detalle ledger</span></div>
+    {commission_table(revenue["rows"])}
     <div class="section-head"><h2>Ultimas ordenes</h2><span class="badge">Resumen rapido</span></div>
     {split_orders_timeline(store, active_orders, token)}
     <div class="section-head"><h2>Legado / pruebas</h2><span class="muted">Auditoria</span></div>
@@ -713,6 +732,75 @@ def attention_pill(order) -> str:
     if order.payment_status in EXPIRED_STATES:
         return '<span class="pill info">expirada</span>'
     return '<span class="pill warn">normal</span>'
+
+
+def commission_summary(store: OrderStore) -> dict:
+    rows = []
+    total_spread = 0.0
+    total_spread_grams = 0.0
+    total_exchange_fee = 0.0
+    settled_count = 0
+    for account in store.list_accounts(500):
+        for entry in store.get_portfolio(account.customer_id).entries:
+            if entry.entry_type != "xaut_purchase":
+                continue
+            settled_count += 1
+            payload = entry.payload or {}
+            allocation = payload.get("allocation") if isinstance(payload, dict) else {}
+            fill = payload.get("order") if isinstance(payload, dict) else {}
+            chaut_spread = float((allocation or {}).get("chaut_spread_xaut") or 0)
+            chaut_spread_grams = float((allocation or {}).get("chaut_spread_gold_grams") or 0)
+            exchange_fee = float((fill or {}).get("field_fees") or 0)
+            total_spread += chaut_spread
+            total_spread_grams += chaut_spread_grams
+            total_exchange_fee += exchange_fee
+            rows.append(
+                {
+                    "created_at": entry.created_at,
+                    "external_id": entry.external_id,
+                    "customer_id": entry.customer_id,
+                    "cop_gross": entry.cop_gross,
+                    "client_xaut": entry.amount,
+                    "client_grams": entry.gold_grams,
+                    "chaut_spread_xaut": chaut_spread,
+                    "chaut_spread_gold_grams": chaut_spread_grams,
+                    "exchange_fee_xaut": exchange_fee,
+                }
+            )
+    rows.sort(key=lambda row: order_sort_key(row["created_at"]), reverse=True)
+    return {
+        "settled_count": settled_count,
+        "paid_count": sum(1 for row in rows if row["chaut_spread_xaut"] > 0),
+        "chaut_spread_xaut": total_spread,
+        "chaut_spread_gold_grams": total_spread_grams,
+        "exchange_fee_xaut": total_exchange_fee,
+        "rows": rows,
+    }
+
+
+def commission_table(rows: list[dict]) -> str:
+    visible_rows = [row for row in rows if row["chaut_spread_xaut"] > 0]
+    html_rows = []
+    for row in visible_rows[:8]:
+        html_rows.append(
+            f"<tr><td class='date'>{format_bogota_time(row['created_at'])}</td>"
+            f"<td><a class='order-id' href='/admin/orders/{escape(row['external_id'])}'><code>{escape(row['external_id'])}</code></a></td>"
+            f"<td><code>{escape(row['customer_id'])}</code></td>"
+            f"<td class='money'>{row['cop_gross']:,.0f}</td>"
+            f"<td>{row['client_xaut']:.18f}</td>"
+            f"<td>{row['chaut_spread_xaut']:.18f}</td>"
+            f"<td>{row['chaut_spread_gold_grams']:.12f} g</td>"
+            f"<td>{row['exchange_fee_xaut']:.18f}</td></tr>"
+        )
+    if not html_rows:
+        html_rows.append(
+            "<tr><td colspan='8' class='empty'>Sin comisiones XAUT registradas aun.</td></tr>"
+        )
+    return (
+        "<div class='table-wrap'><table><thead><tr><th>Fecha</th><th>Orden</th><th>Usuario</th><th>COP</th><th>XAUT cliente</th><th>XAUT Chaut</th><th>Oro Chaut</th><th>Fee HTX</th></tr></thead><tbody>"
+        + "".join(html_rows)
+        + "</tbody></table></div>"
+    )
 
 
 def metric_card(label: str, value) -> str:
