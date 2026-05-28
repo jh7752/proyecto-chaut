@@ -216,6 +216,31 @@ class PortfolioResponse(BaseModel):
     entries: list[LedgerEntryResponse] = Field(default_factory=list)
 
 
+class WithdrawalRequest(BaseModel):
+    customer_id: str = Field(min_length=1)
+    provider: str = Field(default="telegram", min_length=1)
+    provider_user_id: str = Field(min_length=1)
+    chat_id: str | None = None
+    breb_key: str = Field(min_length=3, max_length=120)
+    amount_mode: str = Field(default="all", pattern="^all$")
+    portfolio_snapshot: dict = Field(default_factory=dict)
+
+
+class WithdrawalResponse(BaseModel):
+    withdrawal_id: str
+    customer_id: str
+    provider: str
+    provider_user_id: str
+    chat_id: str | None = None
+    breb_key: str
+    amount_mode: str
+    gold_grams: float
+    xaut_amount: float
+    estimated_value_cop: float | None = None
+    status: str
+    created_at: str
+
+
 class CreditProfileResponse(BaseModel):
     customer_id: str
     score: int

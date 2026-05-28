@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -53,6 +54,8 @@ from .models import (
     OrderResponse,
     PortfolioResponse,
     PaymentInstructionsResponse,
+    WithdrawalRequest,
+    WithdrawalResponse,
     XautQuoteResponse,
     build_order,
     DEFAULT_PAYMENT_EXPIRATION_MINUTES,
@@ -338,6 +341,42 @@ def create_app(
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
         return _with_estimated_portfolio_value(store.get_portfolio(account.customer_id), settings, coinsenda_client)
+
+    @app.post("/withdrawals", response_model=WithdrawalResponse)
+    def create_withdrawal_request(payload: WithdrawalRequest) -> WithdrawalResponse:
+        account = store.get_account(payload.customer_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail="Account not found")
+        linked_account = store.get_account_by_identity(payload.provider, payload.provider_user_id)
+        if linked_account is None or linked_account.customer_id != payload.customer_id:
+            raise HTTPException(status_code=409, detail="Identity does not match account")
+        portfolio = _with_estimated_portfolio_value(store.get_portfolio(payload.customer_id), settings, coinsenda_client)
+        if portfolio.gold_grams_net <= 0 or portfolio.xaut_net <= 0:
+            raise HTTPException(status_code=409, detail="No gold available to withdraw")
+        withdrawal = WithdrawalResponse(
+            withdrawal_id=f"wd-{uuid4().hex[:12]}",
+            customer_id=payload.customer_id,
+            provider=payload.provider,
+            provider_user_id=payload.provider_user_id,
+            chat_id=payload.chat_id,
+            breb_key=" ".join(payload.breb_key.split()),
+            amount_mode=payload.amount_mode,
+            gold_grams=portfolio.gold_grams_net,
+            xaut_amount=portfolio.xaut_net,
+            estimated_value_cop=portfolio.estimated_value_cop,
+            status="requested",
+            created_at=datetime.now(UTC).isoformat(),
+        )
+        store.add_event(
+            payload.customer_id,
+            "withdrawal.requested",
+            {
+                **withdrawal.model_dump(),
+                "portfolio_snapshot": portfolio.model_dump(),
+                "client_snapshot": payload.portfolio_snapshot,
+            },
+        )
+        return withdrawal
 
     @app.get("/htx/health")
     def htx_health() -> dict:

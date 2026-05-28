@@ -13,6 +13,7 @@ PAYMENT_EXPIRATION_MINUTES = 45
 PENDING_NAMES: dict[int, bool] = {}
 PENDING_CUSTOM_AMOUNTS: set[int] = set()
 PENDING_SETTLEMENTS: set[str] = set()
+PENDING_WITHDRAWAL_KEYS: dict[int, dict[str, Any]] = {}
 
 
 def main() -> None:
@@ -42,6 +43,8 @@ def handle_update(update: dict[str, Any]) -> None:
         register_name(chat_id, user, text)
     elif PENDING_CUSTOM_AMOUNTS.__contains__(chat_id) and text and not text.startswith("/"):
         handle_custom_amount(chat_id, user, text)
+    elif chat_id in PENDING_WITHDRAWAL_KEYS and text and not text.startswith("/"):
+        handle_withdrawal_key(chat_id, user, text)
     elif text.startswith("/start"):
         welcome_or_onboard(chat_id, user)
     elif text.startswith("/ahorros"):
@@ -100,6 +103,19 @@ def handle_callback(callback: dict[str, Any]) -> None:
         send_balance(chat_id, user)
     elif data == "movimientos":
         send_movements(chat_id, user)
+    elif data == "withdraw:start":
+        start_withdrawal(chat_id, user)
+    elif data == "withdraw:all":
+        ask_withdrawal_key(chat_id, user)
+    elif data == "withdraw:custom":
+        send_text(chat_id, "Por ahora solo puedes retirar todo el oro disponible.", buttons=[[{"text": "Retirar todo", "callback_data": "withdraw:all"}, {"text": "Cancelar", "callback_data": "withdraw:cancel"}]])
+    elif data == "withdraw:change_key":
+        ask_withdrawal_key(chat_id, user)
+    elif data == "withdraw:confirm":
+        confirm_withdrawal(chat_id, user)
+    elif data == "withdraw:cancel":
+        PENDING_WITHDRAWAL_KEYS.pop(chat_id, None)
+        send_text(chat_id, "Retiro cancelado.")
 
 
 def handle_custom_amount(chat_id: int, user: dict[str, Any], text: str) -> None:
@@ -264,6 +280,18 @@ def settle_order(chat_id: int, external_id: str) -> None:
     send_text(chat_id, message)
 
 
+def format_cop(value: float | int | None) -> str:
+    if value is None:
+        return "0"
+    return f"{float(value):,.0f}"
+
+
+def portfolio_for_user(chat_id: int, user: dict[str, Any]) -> dict[str, Any] | None:
+    if not account_exists(user.get("id", chat_id)):
+        return None
+    return api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}/portfolio")
+
+
 def send_balance(chat_id: int, user: dict[str, Any]) -> None:
     if not account_exists(user.get("id", chat_id)):
         send_text(chat_id, "Todavía no tengo tu cuenta por aquí. Vamos a crearla en un momento.")
@@ -284,11 +312,112 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
             f"Movimientos: {portfolio['entries_count']}",
         ]
     )
+    buttons = [[{"text": "🥇 Ahorrar más", "callback_data": "menu:ahorros"}, {"text": "📜 Movimientos", "callback_data": "movimientos"}]]
+    if portfolio.get("gold_grams_net", 0) > 0:
+        buttons.append([{"text": "Retirar oro 🥇", "callback_data": "withdraw:start"}])
+    send_text(chat_id, "\n".join(lines), buttons=buttons)
+
+
+def start_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
+    try:
+        portfolio = portfolio_for_user(chat_id, user)
+    except Exception:
+        portfolio = None
+    if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:
+        send_text(chat_id, "Aún no tienes oro digital disponible para retirar.")
+        return
+    estimated_cop = portfolio.get("estimated_value_cop")
+    lines = [
+        "Retirar oro 🥇",
+        "",
+        f"Disponible: {portfolio['gold_grams_net']:.12f} g",
+    ]
+    if estimated_cop is not None:
+        lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
+    lines.append("\n¿Cuánto quieres retirar?")
     send_text(
         chat_id,
         "\n".join(lines),
-        buttons=[[{"text": "🥇 Ahorrar más", "callback_data": "menu:ahorros"}, {"text": "📜 Movimientos", "callback_data": "movimientos"}]],
+        buttons=[
+            [{"text": "Retirar todo", "callback_data": "withdraw:all"}, {"text": "Otro monto", "callback_data": "withdraw:custom"}],
+            [{"text": "Cancelar", "callback_data": "withdraw:cancel"}],
+        ],
     )
+
+
+def ask_withdrawal_key(chat_id: int, user: dict[str, Any]) -> None:
+    try:
+        portfolio = portfolio_for_user(chat_id, user)
+    except Exception:
+        portfolio = None
+    if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:
+        send_text(chat_id, "Aún no tienes oro digital disponible para retirar.")
+        return
+    PENDING_WITHDRAWAL_KEYS[chat_id] = {"portfolio": portfolio}
+    send_text(
+        chat_id,
+        "¿A qué llave Bre-B enviamos el dinero?\n\nEscribe tu llave Bre-B.",
+        buttons=[[{"text": "Cancelar", "callback_data": "withdraw:cancel"}]],
+    )
+
+
+def handle_withdrawal_key(chat_id: int, user: dict[str, Any], text: str) -> None:
+    request = PENDING_WITHDRAWAL_KEYS.get(chat_id) or {}
+    breb_key = " ".join(text.split())
+    if len(breb_key) < 3:
+        send_text(chat_id, "Esa llave se ve muy corta. Escríbela de nuevo, porfa.")
+        return
+    try:
+        portfolio = portfolio_for_user(chat_id, user) or request.get("portfolio")
+    except Exception:
+        portfolio = request.get("portfolio")
+    if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:
+        PENDING_WITHDRAWAL_KEYS.pop(chat_id, None)
+        send_text(chat_id, "Aún no tienes oro digital disponible para retirar.")
+        return
+    request = {"portfolio": portfolio, "breb_key": breb_key}
+    PENDING_WITHDRAWAL_KEYS[chat_id] = request
+    estimated_cop = portfolio.get("estimated_value_cop")
+    lines = ["Confirmar retiro", ""]
+    if estimated_cop is not None:
+        lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
+    lines.extend([f"Llave Bre-B: {breb_key}", "", "¿Confirmas?"])
+    send_text(
+        chat_id,
+        "\n".join(lines),
+        buttons=[
+            [{"text": "Confirmar", "callback_data": "withdraw:confirm"}],
+            [{"text": "Cambiar llave", "callback_data": "withdraw:change_key"}, {"text": "Cancelar", "callback_data": "withdraw:cancel"}],
+        ],
+    )
+
+
+def confirm_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
+    request = PENDING_WITHDRAWAL_KEYS.pop(chat_id, None)
+    if not request or not request.get("breb_key"):
+        ask_withdrawal_key(chat_id, user)
+        return
+    try:
+        account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
+        payload = {
+            "customer_id": account["customer_id"],
+            "provider": "telegram",
+            "provider_user_id": str(user.get("id", chat_id)),
+            "chat_id": str(chat_id),
+            "breb_key": request["breb_key"],
+            "amount_mode": "all",
+            "portfolio_snapshot": request.get("portfolio", {}),
+        }
+        withdrawal = api("POST", "/withdrawals", payload)
+    except Exception as exc:
+        send_text(chat_id, f"No pude registrar el retiro. Intenta de nuevo en un momento.\n\nDetalle: {friendly_api_error(exc)}")
+        return
+    estimated_cop = withdrawal.get("estimated_value_cop")
+    lines = ["Solicitud recibida ✅"]
+    if estimated_cop is not None:
+        lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
+    lines.append("Te avisaremos cuando quede procesada.")
+    send_text(chat_id, "\n".join(lines), buttons=[[{"text": "📊 Ver saldo", "callback_data": "saldo"}]])
 
 
 def send_movements(chat_id: int, user: dict[str, Any]) -> None:

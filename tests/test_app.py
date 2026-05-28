@@ -944,3 +944,66 @@ def test_admin_login_protects_dashboard(tmp_path) -> None:
     allowed = client.get("/admin")
     assert allowed.status_code == 200
     assert "Chaut Admin" in allowed.text
+
+
+def test_create_withdrawal_request_records_customer_event(tmp_path) -> None:
+    from chaut_api.store import create_store
+
+    database_url = f"sqlite:///{tmp_path / 'test.db'}"
+    client = TestClient(create_app(settings=Settings(database_url=database_url)))
+    account = client.post(
+        "/accounts/identify",
+        json={"provider": "telegram", "provider_user_id": "withdraw-1", "chat_id": "withdraw-1", "display_name": "Retiro Uno"},
+    ).json()
+    order = client.post(
+        "/orders",
+        json={"client_id": "telegram:withdraw-1", "customer_id": account["customer_id"], "amount_cop_gross": 5000},
+    ).json()
+    store = create_store(database_url)
+    store.create_ledger_entry(
+        store.get_order(order["external_id"]),
+        {"xaut_net": 0.001, "gold_grams_net": 0.0311034768, "field_cash_amount": "4.5", "order_id": "htx-1"},
+        {"prepared": {"ask_price": 4500}},
+    )
+
+    response = client.post(
+        "/withdrawals",
+        json={
+            "customer_id": account["customer_id"],
+            "provider": "telegram",
+            "provider_user_id": "withdraw-1",
+            "chat_id": "withdraw-1",
+            "breb_key": "  3001234567  ",
+            "amount_mode": "all",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "requested"
+    assert body["breb_key"] == "3001234567"
+    assert body["gold_grams"] == 0.0311034768
+    events = store.list_events(account["customer_id"])
+    assert events[-1].event_type == "withdrawal.requested"
+    assert events[-1].payload["withdrawal_id"] == body["withdrawal_id"]
+
+
+def test_create_withdrawal_request_rejects_mismatched_identity(tmp_path) -> None:
+    client = make_client(tmp_path)
+    account = client.post(
+        "/accounts/identify",
+        json={"provider": "telegram", "provider_user_id": "owner", "display_name": "Owner"},
+    ).json()
+
+    response = client.post(
+        "/withdrawals",
+        json={
+            "customer_id": account["customer_id"],
+            "provider": "telegram",
+            "provider_user_id": "other",
+            "breb_key": "3001234567",
+            "amount_mode": "all",
+        },
+    )
+
+    assert response.status_code == 409
