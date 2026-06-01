@@ -71,6 +71,10 @@ def estimate_spread_profit_cop(amount_cop: int | float, sell_price: float, refer
     return round(max(float(reference_rate) - float(sell_price), 0) * confirmed_usdt, 2)
 
 
+def apply_portfolio_valuation_discount(reference_rate: float, discount_percent: float) -> float:
+    return round(float(reference_rate) * (1 - (float(discount_percent) / 100)), 2)
+
+
 def _parse_dt(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -119,8 +123,10 @@ def _with_estimated_portfolio_value(
     except Exception:
         xaut_price = _latest_portfolio_rate(portfolio)
     try:
-        coinsenda_rate = getattr(coinsenda_client, "get_usdt_cop_sell_price", None)
-        cop_per_usdt = float(coinsenda_rate() if callable(coinsenda_rate) else get_usdt_cop_sell_price())
+        trm = get_seticap_trm()
+        cop_per_usdt = apply_portfolio_valuation_discount(
+            trm["reference_rate"], settings.portfolio_valuation_discount_percent
+        )
     except Exception:
         cop_per_usdt = _latest_portfolio_cop_per_usdt(portfolio)
     if xaut_price is None or cop_per_usdt is None:
