@@ -71,8 +71,8 @@ def estimate_spread_profit_cop(amount_cop: int | float, sell_price: float, refer
     return round(max(float(reference_rate) - float(sell_price), 0) * confirmed_usdt, 2)
 
 
-def apply_portfolio_valuation_discount(reference_rate: float, discount_cop: float) -> float:
-    return round(max(float(reference_rate) - float(discount_cop), 0), 2)
+def apply_portfolio_valuation_discount(reference_rate: float, discount_percent: float) -> float:
+    return round(float(reference_rate) * (1 - (float(discount_percent) / 100)), 2)
 
 
 def _parse_dt(value: str | None) -> datetime | None:
@@ -125,7 +125,7 @@ def _with_estimated_portfolio_value(
     try:
         trm = get_seticap_trm()
         cop_per_usdt = apply_portfolio_valuation_discount(
-            trm["reference_rate"], settings.portfolio_valuation_discount_cop
+            trm["reference_rate"], settings.portfolio_valuation_discount_percent
         )
     except Exception:
         cop_per_usdt = _latest_portfolio_cop_per_usdt(portfolio)

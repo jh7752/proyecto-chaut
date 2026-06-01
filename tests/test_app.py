@@ -802,7 +802,7 @@ def test_portfolio_tracks_user_ledger_after_settlement(monkeypatch, tmp_path) ->
     assert portfolio["entries"][0]["external_id"] == checkout["external_id"]
 
 
-def test_portfolio_value_uses_seticap_trm_minus_configured_cop_discount(monkeypatch, tmp_path) -> None:
+def test_portfolio_value_uses_seticap_trm_minus_configured_discount(monkeypatch, tmp_path) -> None:
     import chaut_api.app as app_module
 
     class StubHtxClient:
@@ -812,7 +812,7 @@ def test_portfolio_value_uses_seticap_trm_minus_configured_cop_discount(monkeypa
     monkeypatch.setattr(app_module, "create_htx_client", lambda *args, **kwargs: StubHtxClient())
     settings = Settings(
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
-        portfolio_valuation_discount_cop=3,
+        portfolio_valuation_discount_percent=3,
     )
     client = TestClient(create_app(settings=settings))
     account = client.post(
@@ -836,8 +836,8 @@ def test_portfolio_value_uses_seticap_trm_minus_configured_cop_discount(monkeypa
     portfolio = client.get("/accounts/by-identity/telegram/value-1/portfolio").json()
 
     assert portfolio["valuation_price_xaut_usdt"] == 4500.0
-    assert portfolio["valuation_rate_cop_per_usdt"] == 3791.91
-    assert portfolio["estimated_value_cop"] == 17063.6
+    assert portfolio["valuation_rate_cop_per_usdt"] == 3681.06
+    assert portfolio["estimated_value_cop"] == 16564.77
 
 
 def test_admin_orders_shows_attention_queue(tmp_path) -> None:
