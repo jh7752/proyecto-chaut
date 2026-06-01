@@ -1045,3 +1045,33 @@ def test_create_withdrawal_request_rejects_mismatched_identity(tmp_path) -> None
     )
 
     assert response.status_code == 409
+
+
+def test_trm_prefers_superfinanciera_over_stale_cache(monkeypatch, tmp_path) -> None:
+    import chaut_api.trm as trm_module
+
+    cache_path = tmp_path / "trm-cache.json"
+    cache_path.write_text(
+        '{"reference_rate":3448.35,"source":"seticap-cache-stale","fetched_at_epoch":1}'
+    )
+    monkeypatch.setattr(trm_module, "CACHE_PATH", cache_path)
+    monkeypatch.setattr(
+        trm_module,
+        "_fetch_superfinanciera_trm",
+        lambda: {
+            "reference_rate": 3678.15,
+            "reference_rate_source": "superfinanciera-datos-gov",
+            "reference_rate_date": "2026-05-30T00:00:00.000",
+            "source": "superfinanciera",
+        },
+    )
+    monkeypatch.setattr(
+        trm_module,
+        "_fetch_seticap_trm",
+        lambda: (_ for _ in ()).throw(RuntimeError("seticap should not be used")),
+    )
+
+    trm = trm_module.get_seticap_trm(ttl_seconds=0)
+
+    assert trm["reference_rate"] == 3678.15
+    assert trm["source"] == "superfinanciera"
