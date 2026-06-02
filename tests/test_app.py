@@ -802,19 +802,23 @@ def test_portfolio_tracks_user_ledger_after_settlement(monkeypatch, tmp_path) ->
     assert portfolio["entries"][0]["external_id"] == checkout["external_id"]
 
 
-def test_portfolio_value_uses_seticap_trm_minus_configured_discount(monkeypatch, tmp_path) -> None:
+def test_portfolio_value_uses_coinsenda_sell_price_plus_configured_markup(monkeypatch, tmp_path) -> None:
     import chaut_api.app as app_module
 
     class StubHtxClient:
         def get_xaut_ticker(self):
             return {"category": "spot", "symbol": "xautusdt", "price": "4500", "raw": {"status": "ok"}}
 
+    class StubCoinsendaClient:
+        def get_usdt_cop_sell_price(self):
+            return 3392.52
+
     monkeypatch.setattr(app_module, "create_htx_client", lambda *args, **kwargs: StubHtxClient())
     settings = Settings(
         database_url=f"sqlite:///{tmp_path / 'test.db'}",
-        portfolio_valuation_discount_percent=3,
+        portfolio_valuation_markup_percent=2,
     )
-    client = TestClient(create_app(settings=settings))
+    client = TestClient(create_app(settings=settings, coinsenda_client=StubCoinsendaClient()))
     account = client.post(
         "/accounts/identify",
         json={"provider": "telegram", "provider_user_id": "value-1", "display_name": "Value Uno"},
@@ -836,8 +840,8 @@ def test_portfolio_value_uses_seticap_trm_minus_configured_discount(monkeypatch,
     portfolio = client.get("/accounts/by-identity/telegram/value-1/portfolio").json()
 
     assert portfolio["valuation_price_xaut_usdt"] == 4500.0
-    assert portfolio["valuation_rate_cop_per_usdt"] == 3681.06
-    assert portfolio["estimated_value_cop"] == 16564.77
+    assert portfolio["valuation_rate_cop_per_usdt"] == 3460.37
+    assert portfolio["estimated_value_cop"] == 15571.66
 
 
 def test_admin_orders_shows_attention_queue(tmp_path) -> None:
