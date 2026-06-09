@@ -342,8 +342,53 @@ def test_checkout_retries_when_price_slippage_exceeds_tolerance(monkeypatch, tmp
     assert body["instructions"]["checkout_attempts"][1]["checkout_status"] == "ready"
 
     first_external_id = body["instructions"]["checkout_attempts"][0]["external_id"]
-    first_events = client.get(f"/orders/{first_external_id}/events").json()
-    assert first_events[-1]["event_type"] == "checkout.price_mismatch"
+    first_order = client.get(f"/orders/{first_external_id}").json()
+    assert first_order["payment_status"] == "voided"
+    first_event_types = [event["event_type"] for event in client.get(f"/orders/{first_external_id}/events").json()]
+    assert "checkout.price_mismatch" in first_event_types
+    assert "checkout.replaced" in first_event_types
+
+
+class UnverifiedCoinsendaClient(AcceptedCoinsendaClient):
+    def inspect_payment_request(self, order, click_text: str):
+        return {
+            "mode": "mock",
+            "targetUrl": order.payment_url,
+            "clickText": click_text,
+            "after": {"text": "Verificando parámetros de pago..."},
+            "events": [],
+        }
+
+
+def test_checkout_voids_unverified_retry_attempt_and_returns_final_unverified(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    prices = iter([3423.99, 3423.98])
+    monkeypatch.setattr(app_module, "get_usdt_cop_sell_price", lambda: next(prices))
+    client = make_client_with_coinsenda(tmp_path, UnverifiedCoinsendaClient())
+
+    response = client.post(
+        "/checkout",
+        json={
+            "client_id": "telegram:8528719436",
+            "amount_cop": 5000,
+            "expiration_minutes": 45,
+            "max_retries": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checkout_status"] == "price_unverified"
+    assert body["pay_to"] is None
+    assert body["pay_amount_cop"] is None
+    first_external_id = body["instructions"]["checkout_attempts"][0]["external_id"]
+    final_external_id = body["external_id"]
+    assert first_external_id != final_external_id
+    assert client.get(f"/orders/{first_external_id}").json()["payment_status"] == "voided"
+    assert client.get(f"/orders/{final_external_id}").json()["payment_status"] == "pending"
+    first_event_types = [event["event_type"] for event in client.get(f"/orders/{first_external_id}/events").json()]
+    assert "checkout.replaced" in first_event_types
 
 
 def test_account_identify_creates_and_updates_customer(tmp_path) -> None:

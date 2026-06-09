@@ -9,6 +9,7 @@ on:
       - 'app/**'
       - 'Dockerfile'
       - 'docker-compose.yml'
+      - 'vendor/coinsenda/scripts/**'
       - 'pyproject.toml'
       - '.github/workflows/deploy-ec2.yml'
 

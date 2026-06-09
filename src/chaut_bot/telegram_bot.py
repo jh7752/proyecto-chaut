@@ -244,10 +244,17 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
     }
     checkout = api("POST", "/checkout", payload)
     external_id = checkout["external_id"]
+    if checkout.get("checkout_status") != "ready" or not checkout.get("pay_to") or not checkout.get("pay_amount_cop"):
+        send_text(
+            chat_id,
+            "No pude generar una llave Bre-B confiable en este momento. Intenta de nuevo en unos segundos, por favor.",
+            buttons=[[{"text": "Intentar otra vez", "callback_data": f"ahorros:{amount_cop}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]],
+        )
+        return
     text = (
         "Listo. Haz la transferencia exacta por Bre-B:\n\n"
         "Monto: "
-        f"{checkout.get('pay_amount_cop') or amount_cop} COP\n"
+        f"{checkout.get('pay_amount_cop')} COP\n"
         f"Llave: {checkout.get('pay_to')}\n\n"
         f"Orden: {external_id}\n\n"
         f"Esta referencia vence en {checkout.get('expires_in_minutes') or PAYMENT_EXPIRATION_MINUTES} minutos.\n\n"

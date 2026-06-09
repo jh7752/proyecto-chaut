@@ -663,6 +663,18 @@ def create_app(
                     "price_validation": attempt,
                 },
             )
+            if checkout_status != "ready" and attempt_number < max_attempts:
+                replaced_order = store.update_payment_status(updated_order.external_id, "voided")
+                if replaced_order is not None:
+                    store.add_event(
+                        updated_order.external_id,
+                        "checkout.replaced",
+                        {
+                            "reason": "checkout_not_ready",
+                            "checkout_status": checkout_status,
+                            "next_attempt": attempt_number + 1,
+                        },
+                    )
             last_result = {
                 "order": updated_order,
                 "instructions": instructions,

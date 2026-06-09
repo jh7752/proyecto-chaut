@@ -16,10 +16,25 @@ fs.mkdirSync(outDir, { recursive: true });
 const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
 const base = path.join(outDir, `${stamp}-click-${clickText.replace(/[^a-z0-9]+/gi, '-')}`);
 const browserPath = process.env.PLAYWRIGHT_CHROMIUM_PATH || path.join(process.env.HOME, '.cache/ms-playwright/chromium-1217/chrome-linux/chrome');
+const FINAL_INSTRUCTIONS_RE = /(?:Envía|Envia|Enviar)\s+[0-9.,]+\s+COP[\s\S]{0,400}@[A-Za-z0-9._-]{6,64}/i;
+const CLICK_SETTLE_TIMEOUT_MS = Number(process.env.CHAUT_INSPECT_CLICK_SETTLE_TIMEOUT_MS || 25000);
 
 function safeBody(body) {
   if (!body) return null;
   return body.length > 12000 ? `${body.slice(0, 12000)}...[truncated ${body.length}]` : body;
+}
+
+
+async function waitForFinalInstructions(page, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let lastText = '';
+  while (Date.now() < deadline) {
+    lastText = await page.evaluate(() => document.body.innerText || '').catch(() => '');
+    if (FINAL_INSTRUCTIONS_RE.test(lastText)) return true;
+    if (/No disponible|expirad[ao]|cancelad[ao]|rechazad[ao]/i.test(lastText)) return false;
+    await page.waitForTimeout(1000);
+  }
+  return FINAL_INSTRUCTIONS_RE.test(lastText);
 }
 
 (async () => {
@@ -55,8 +70,8 @@ function safeBody(body) {
     return true;
   }, clickText);
   if (!clicked) throw new Error(`No visible row found for ${clickText}`);
-  await page.waitForTimeout(3000);
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  const finalInstructionsReady = await waitForFinalInstructions(page, CLICK_SETTLE_TIMEOUT_MS);
   await page.screenshot({ path: `${base}-after.png`, fullPage: true });
 
   const after = await page.evaluate(() => ({
@@ -71,8 +86,8 @@ function safeBody(body) {
       type: el.type || null
     }))
   }));
-  const result = { targetUrl, clickText, before, after, events };
+  const result = { targetUrl, clickText, before, after, finalInstructionsReady, events };
   fs.writeFileSync(`${base}.json`, JSON.stringify(result, null, 2));
-  console.log(JSON.stringify({ out: `${base}.json`, before: before.slice(0, 1000), after: { ...after, text: after.text.slice(0, 3000) }, eventsCount: events.length }, null, 2));
+  console.log(JSON.stringify({ out: `${base}.json`, before: before.slice(0, 1000), after: { ...after, text: after.text.slice(0, 3000) }, finalInstructionsReady, eventsCount: events.length }, null, 2));
   await browser.close();
 })().catch((err) => { console.error(err.stack || err); process.exit(1); });
