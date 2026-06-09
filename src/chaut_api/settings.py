@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CHAUT_")
 
     environment: str = Field(default="dev")
-    fee_percent: float = Field(default=0.5)
+    fee_percent: float = Field(default=0.0)
     portfolio_valuation_markup_percent: float = Field(default=2.0)
     database_url: str = Field(default="sqlite:///./data/chaut.db")
     coinsenda_mode: str = Field(default="mock")

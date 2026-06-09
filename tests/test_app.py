@@ -38,7 +38,7 @@ def test_create_order_calculates_fee_and_persists(tmp_path) -> None:
     response = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000})
     assert response.status_code == 200
     body = response.json()
-    assert body["fee_percent"] == 0.5
+    assert body["fee_percent"] == 0
     assert body["fee_cop"] == 0
     assert body["amount_cop_net"] == 100000
     assert body["payment_status"] == "draft"
@@ -655,10 +655,10 @@ def test_xaut_quote_applies_fee_before_user_grams(monkeypatch, tmp_path) -> None
     assert body["status"] == "quoted"
     assert body["confirmed_usdt"] == 1.417438
     assert body["xaut_ask_price"] == 4692.8
-    assert body["fee_percent"] == 0.5
-    assert body["xaut_gross"] > body["xaut_net"]
-    assert body["fee_xaut"] > 0
-    assert body["gold_grams_gross"] > body["gold_grams_net"]
+    assert body["fee_percent"] == 0
+    assert body["xaut_gross"] == body["xaut_net"]
+    assert body["fee_xaut"] == 0
+    assert body["gold_grams_gross"] == body["gold_grams_net"]
     events = client.get(f"/orders/{order['external_id']}/events").json()
     assert events[-1]["event_type"] == "xaut.quote_created"
     assert events[-1]["payload"]["gold_grams_net"] == body["gold_grams_net"]

@@ -13,7 +13,7 @@ function parseArgs(argv) {
   const args = {
     amount: null,
     client_id: 'telegram-demo',
-    fee_percent: process.env.XAUT_FEE_PERCENT || '0.5',
+    fee_percent: process.env.XAUT_FEE_PERCENT || '0',
     rate: process.env.XAUT_COP_PER_USDT || null,
     external_id: null
   };

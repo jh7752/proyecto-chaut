@@ -29,7 +29,6 @@ Globals:
         CHAUT_ENVIRONMENT: !Ref Environment
         CHAUT_ORDERS_TABLE: !Ref OrdersTable
         CHAUT_EVENTS_TABLE: !Ref EventsTable
-        CHAUT_FEE_PERCENT: '0.5'
 
 Resources:
   ApiFunction:

@@ -5,7 +5,6 @@ services:
     restart: unless-stopped
     environment:
       CHAUT_ENVIRONMENT: dev
-      CHAUT_FEE_PERCENT: "0.5"
       CHAUT_DATABASE_URL: sqlite:////data/chaut.db
       CHAUT_ADMIN_TOKEN: ${CHAUT_ADMIN_TOKEN:-}
       CHAUT_ADMIN_USERNAME: ${CHAUT_ADMIN_USERNAME:-}

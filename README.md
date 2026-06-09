@@ -48,7 +48,7 @@ Endpoints principales:
 - `GET /kucoin/health` - prueba conexion publica KuCoin para XAUT-USDT.
 - `GET /kucoin/xaut-ticker` - precio publico spot KuCoin XAUT-USDT.
 - `GET /kucoin/xaut-instrument` - filtros/precision publica del instrumento spot KuCoin XAUT-USDT.
-- `POST /orders` - crea orden draft, calcula comision y estimado USDT opcional.
+- `POST /orders` - crea orden draft y estimado USDT opcional.
 - `GET /orders/{external_id}` - consulta orden guardada.
 - `GET /orders/{external_id}/events` - lista eventos auditables de la orden.
 - `POST /orders/{external_id}/payment-request` - crea/asocia PaymentRequest en modo seguro.
@@ -57,7 +57,7 @@ Endpoints principales:
 
 Estado actual: persistencia local en volumen Docker para MVP/test.
 
-La comisión ya no se descuenta en COP. El usuario paga el COP digitado; la comisión se aplicará después sobre XAUT cuando exista el módulo de compra.
+El usuario paga el COP digitado completo. El ingreso de Chaut no es una comisión fija: se calcula al final como diferencial cambiario convertido a XAUT.
 
 ## XAUT Quote
 
@@ -67,13 +67,18 @@ Cuando una orden ya tiene `payment_status=confirmed` y `payment_currency=usdt`, 
 POST /orders/{external_id}/xaut-quote
 ```
 
-La cotizacion usa HTX como venue principal para `xautusdt`; KuCoin queda como venue secundario/consulta de respaldo. Calcula XAUT bruto, descuenta el fee de Chaut en XAUT y solo entrega al usuario la cifra neta:
+La cotizacion usa HTX como venue principal para `xautusdt`; KuCoin queda como venue secundario/consulta de respaldo. La cotizacion indicativa ya no aplica fee fijo: el ingreso de Chaut se determina en el ledger final por diferencial cambiario.
 
 ```text
 xaut_gross = confirmed_usdt / ask_price
-fee_xaut = xaut_gross * fee_percent / 100
-xaut_net = xaut_gross - fee_xaut
+xaut_net = xaut_gross
 gold_grams_net = xaut_net * 31.1034768
+
+# En settlement/ledger:
+client_usdt_equivalent = amount_cop / reference_rate
+client_ratio = client_usdt_equivalent / execution_usdt
+xaut_cliente = xaut_total_net * client_ratio
+xaut_chaut = xaut_total_net - xaut_cliente
 ```
 
 Esto no compra XAUT ni mueve fondos. Registra evento `xaut.quote_created`. La liquidacion final requiere ejecucion real en el venue aprobado.
@@ -219,7 +224,7 @@ El primer modulo queda concluido como MVP operativo:
 - Fuente de verdad interna: orden Chaut con `external_id`, montos, PaymentRequest y eventos.
 - Cobro real: PaymentRequest de Coinsenda en `usdt`, calculado desde COP con `sell_price`.
 - UX de pago: instrucciones Bre-B listas para bot/mini-app (`pay_amount_cop`, `pay_to`, `payment_url`).
-- Seguridad operativa: sin movimientos de fondos automaticos y sin comision descontada en COP.
+- Seguridad operativa: sin movimientos de fondos automaticos y sin comision fija descontada en COP.
 - Conciliacion: endpoint separado para verificar estado contra Coinsenda antes de confirmar pagos.
 
 Validacion de precio: `/checkout` compara `pay_amount_cop` contra `amount_cop`. Si el deslizamiento supera `max_price_slippage_cop`, registra `checkout.price_mismatch` y reintenta hasta `max_retries`. Si el ultimo intento sigue fuera de tolerancia, responde `checkout_status=price_mismatch` para no entregar instrucciones como listas.
