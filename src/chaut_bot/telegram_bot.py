@@ -202,7 +202,7 @@ def register_name(chat_id: int, user: dict[str, Any], display_name: str) -> None
     PENDING_NAMES.pop(chat_id, None)
     send_text(
         chat_id,
-        f"Listo, {clean_name} 🥇\n\nTu cuenta quedó lista.\n\n¿Qué quieres hacer hoy?",
+        f"Listo, {clean_name}.\n\n¿Cuánto quieres ahorrar hoy?",
         buttons=[
             [{"text": "🥇 5.000 COP", "callback_data": "ahorros:5000"}, {"text": "🥇 10.000 COP", "callback_data": "ahorros:10000"}],
             [{"text": "✍️ Otro monto", "callback_data": "ahorros:custom"}, {"text": "📊 Ver saldo", "callback_data": "saldo"}],
