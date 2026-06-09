@@ -17,6 +17,10 @@ permissions:
   id-token: write
   contents: read
 
+concurrency:
+  group: chaut-ec2-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -28,11 +32,15 @@ jobs:
           aws-region: us-east-1
       - name: Deploy through SSM
         run: |
+          COMMANDS=$(cat <<'JSON'
+          {"commands":["set -euxo pipefail","flock -w 900 /tmp/chaut-deploy.lock bash -lc 'cd /opt/chaut/proyecto-chaut && git fetch origin main && git reset --hard origin/main && docker compose up -d --build --remove-orphans && docker compose ps && git rev-parse --short HEAD'"]}
+          JSON
+          )
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids i-09127c011f918a30e \
             --document-name AWS-RunShellScript \
             --comment "Deploy Proyecto Chaut EC2" \
-            --parameters 'commands=["set -euxo pipefail","cd /opt/chaut/proyecto-chaut","git fetch origin main","git reset --hard origin/main","docker compose up -d --build --remove-orphans","docker ps"]' \
+            --parameters "$COMMANDS" \
             --query 'Command.CommandId' \
             --output text)
           for attempt in $(seq 1 90); do
