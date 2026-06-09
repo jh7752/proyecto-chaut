@@ -9,21 +9,31 @@ from chaut_api.settings import Settings
 def stub_seticap_trm(monkeypatch):
     import chaut_api.app as app_module
 
-    monkeypatch.setattr(
-        app_module,
-        "get_seticap_trm",
-        lambda: {
-            "reference_rate": 3794.91,
-            "source": "seticap-test",
-            "reference_rate_source": "seticap-test",
-            "reference_rate_date": "2026-05-18",
-        },
-    )
+    trm = {
+        "reference_rate": 3794.91,
+        "source": "seticap-test",
+        "reference_rate_source": "seticap-test",
+        "reference_rate_date": "2026-05-18",
+    }
+    monkeypatch.setattr(app_module, "get_seticap_trm", lambda: trm)
+    monkeypatch.setattr(app_module, "get_cached_seticap_trm", lambda: trm)
+    monkeypatch.setattr(app_module, "refresh_seticap_trm_cache", lambda: trm)
+
+
+def build_settings(tmp_path, **overrides):
+    values = {
+        "database_url": f"sqlite:///{tmp_path / 'test.db'}",
+        "admin_token": None,
+        "admin_username": None,
+        "admin_password": None,
+        "admin_session_secret": None,
+    }
+    values.update(overrides)
+    return Settings(**values)
 
 
 def make_client(tmp_path):
-    settings = Settings(database_url=f"sqlite:///{tmp_path / 'test.db'}")
-    return TestClient(create_app(settings=settings))
+    return TestClient(create_app(settings=build_settings(tmp_path)))
 
 
 def test_health(tmp_path) -> None:
@@ -190,8 +200,7 @@ class MismatchedCoinsendaClient(AcceptedCoinsendaClient):
 
 
 def make_client_with_coinsenda(tmp_path, coinsenda_client):
-    settings = Settings(database_url=f"sqlite:///{tmp_path / 'test.db'}")
-    return TestClient(create_app(settings=settings, coinsenda_client=coinsenda_client))
+    return TestClient(create_app(settings=build_settings(tmp_path), coinsenda_client=coinsenda_client))
 
 
 def test_reconcile_payment_confirms_accepted_matching_payment_request(tmp_path) -> None:
@@ -859,8 +868,8 @@ def test_portfolio_value_uses_coinsenda_sell_price_plus_configured_markup(monkey
             return 3392.52
 
     monkeypatch.setattr(app_module, "create_htx_client", lambda *args, **kwargs: StubHtxClient())
-    settings = Settings(
-        database_url=f"sqlite:///{tmp_path / 'test.db'}",
+    settings = build_settings(
+        tmp_path,
         portfolio_valuation_markup_percent=2,
     )
     client = TestClient(create_app(settings=settings, coinsenda_client=StubCoinsendaClient()))
@@ -988,7 +997,6 @@ def test_admin_mark_attention_records_event(tmp_path) -> None:
 def test_admin_expired_orders_show_expiration_time_not_mark_time(tmp_path) -> None:
     from chaut_api.admin import order_date_context
     from chaut_api.app import create_app
-    from chaut_api.settings import Settings
     from chaut_api.store import create_store
 
     class PendingCoinsendaClient(AcceptedCoinsendaClient):
@@ -997,7 +1005,7 @@ def test_admin_expired_orders_show_expiration_time_not_mark_time(tmp_path) -> No
 
             return PaymentRequestStatus(payment_status="pending", raw={"payment_request": {"id": order.payment_request_id}})
 
-    client = TestClient(create_app(settings=Settings(database_url=f"sqlite:///{tmp_path / 'test.db'}"), coinsenda_client=PendingCoinsendaClient()))
+    client = TestClient(create_app(settings=build_settings(tmp_path), coinsenda_client=PendingCoinsendaClient()))
     order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
     client.post(f"/orders/{order['external_id']}/payment-request", json={"expiration_minutes": 60})
     store = create_store(f"sqlite:///{tmp_path / 'test.db'}")
@@ -1087,7 +1095,13 @@ def test_create_withdrawal_request_records_customer_event(tmp_path) -> None:
     from chaut_api.store import create_store
 
     database_url = f"sqlite:///{tmp_path / 'test.db'}"
-    client = TestClient(create_app(settings=Settings(database_url=database_url)))
+    client = TestClient(create_app(settings=Settings(
+        database_url=database_url,
+        admin_token=None,
+        admin_username=None,
+        admin_password=None,
+        admin_session_secret=None,
+    )))
     account = client.post(
         "/accounts/identify",
         json={"provider": "telegram", "provider_user_id": "withdraw-1", "chat_id": "withdraw-1", "display_name": "Retiro Uno"},
@@ -1146,7 +1160,7 @@ def test_create_withdrawal_request_rejects_mismatched_identity(tmp_path) -> None
     assert response.status_code == 409
 
 
-def test_trm_prefers_superfinanciera_over_stale_cache(monkeypatch, tmp_path) -> None:
+def test_trm_prefers_seticap_close_over_stale_cache(monkeypatch, tmp_path) -> None:
     import chaut_api.trm as trm_module
 
     cache_path = tmp_path / "trm-cache.json"
@@ -1156,21 +1170,38 @@ def test_trm_prefers_superfinanciera_over_stale_cache(monkeypatch, tmp_path) -> 
     monkeypatch.setattr(trm_module, "CACHE_PATH", cache_path)
     monkeypatch.setattr(
         trm_module,
-        "_fetch_superfinanciera_trm",
+        "_fetch_seticap_trm",
         lambda: {
             "reference_rate": 3678.15,
-            "reference_rate_source": "superfinanciera-datos-gov",
-            "reference_rate_date": "2026-05-30T00:00:00.000",
-            "source": "superfinanciera",
+            "reference_rate_source": "seticap-close",
+            "reference_rate_date": "1/6/2026",
+            "source": "seticap",
         },
-    )
-    monkeypatch.setattr(
-        trm_module,
-        "_fetch_seticap_trm",
-        lambda: (_ for _ in ()).throw(RuntimeError("seticap should not be used")),
     )
 
     trm = trm_module.get_seticap_trm(ttl_seconds=0)
 
     assert trm["reference_rate"] == 3678.15
-    assert trm["source"] == "superfinanciera"
+    assert trm["source"] == "seticap"
+    assert trm["reference_rate_source"] == "seticap-close"
+
+
+def test_trm_uses_stale_seticap_cache_when_fetch_fails(monkeypatch, tmp_path) -> None:
+    import chaut_api.trm as trm_module
+
+    cache_path = tmp_path / "trm-cache.json"
+    cache_path.write_text(
+        '{"reference_rate":3448.35,"source":"seticap","reference_rate_source":"seticap-close","fetched_at_epoch":1}'
+    )
+    monkeypatch.setattr(trm_module, "CACHE_PATH", cache_path)
+    monkeypatch.setattr(
+        trm_module,
+        "_fetch_seticap_trm",
+        lambda: (_ for _ in ()).throw(RuntimeError("seticap unavailable")),
+    )
+
+    trm = trm_module.get_seticap_trm(ttl_seconds=0)
+
+    assert trm["reference_rate"] == 3448.35
+    assert trm["source"] == "seticap-cache-stale"
+    assert trm["reference_rate_source"] == "seticap-close"

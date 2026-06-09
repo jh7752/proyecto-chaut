@@ -2,18 +2,13 @@ import json
 import re
 import subprocess
 import time
-import urllib.request
 from pathlib import Path
 
 CACHE_PATH = Path("/tmp/chaut-seticap-trm-cache.json")
 CONTAINER_SETICAP_DIR = Path("/app/vendor/seticap-trm")
 REPO_SETICAP_DIR = Path(__file__).resolve().parents[2] / "vendor" / "seticap-trm"
 SETICAP_DIR = CONTAINER_SETICAP_DIR if CONTAINER_SETICAP_DIR.exists() else REPO_SETICAP_DIR
-CACHE_TTL_SECONDS = 3600
-SUPERFINANCIERA_TRM_URL = (
-    "https://www.datos.gov.co/resource/32sa-8pi3.json"
-    "?$limit=1&$order=vigenciadesde%20DESC"
-)
+CACHE_TTL_SECONDS = 1800
 
 
 def get_seticap_trm(ttl_seconds: int = CACHE_TTL_SECONDS) -> dict:
@@ -22,31 +17,29 @@ def get_seticap_trm(ttl_seconds: int = CACHE_TTL_SECONDS) -> dict:
     if cached and now - float(cached.get("fetched_at_epoch", 0)) < ttl_seconds:
         return {**cached, "source": "seticap-cache"}
 
-    for fetcher in (_fetch_superfinanciera_trm, _fetch_seticap_trm):
-        try:
-            payload = fetcher()
-            payload["fetched_at_epoch"] = now
-            CACHE_PATH.write_text(json.dumps(payload))
-            return payload
-        except Exception:
-            continue
+    try:
+        return refresh_seticap_trm_cache()
+    except Exception:
+        pass
     if cached:
-        return {**cached, "source": "trm-cache-stale"}
-    raise RuntimeError("Could not fetch TRM")
+        return {**cached, "source": "seticap-cache-stale"}
+    raise RuntimeError("Could not fetch Seticap close rate")
 
 
-def _fetch_superfinanciera_trm() -> dict:
-    with urllib.request.urlopen(SUPERFINANCIERA_TRM_URL, timeout=10) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    row = payload[0] if payload else {}
-    value = float(row["valor"])
-    return {
-        "reference_rate": value,
-        "reference_rate_source": "superfinanciera-datos-gov",
-        "reference_rate_date": row.get("vigenciadesde"),
-        "reference_rate_valid_until": row.get("vigenciahasta"),
-        "source": "superfinanciera",
-    }
+def get_cached_seticap_trm(ttl_seconds: int = CACHE_TTL_SECONDS) -> dict | None:
+    cached = _read_cache()
+    if not cached:
+        return None
+    now = time.time()
+    source = "seticap-cache" if now - float(cached.get("fetched_at_epoch", 0)) < ttl_seconds else "seticap-cache-stale"
+    return {**cached, "source": source}
+
+
+def refresh_seticap_trm_cache() -> dict:
+    payload = _fetch_seticap_trm()
+    payload["fetched_at_epoch"] = time.time()
+    CACHE_PATH.write_text(json.dumps(payload))
+    return payload
 
 
 def _fetch_seticap_trm() -> dict:

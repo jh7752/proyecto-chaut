@@ -1,3 +1,4 @@
+import threading
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -17,7 +18,7 @@ from .admin import (
     require_admin_login,
     valid_admin_credentials,
 )
-from .trm import get_seticap_trm
+from .trm import get_cached_seticap_trm, get_seticap_trm, refresh_seticap_trm_cache
 from .htx import (
     create_htx_client,
     create_htx_private_client,
@@ -73,6 +74,59 @@ def estimate_spread_profit_cop(amount_cop: int | float, sell_price: float, refer
 
 def apply_portfolio_valuation_markup(sell_price: float, markup_percent: float) -> float:
     return round(float(sell_price) * (1 + (float(markup_percent) / 100)), 2)
+
+
+def build_spread_payload(amount_cop: int | float, sell_price: float, trm: dict | None) -> dict:
+    if trm is None:
+        return {
+            "reference_rate_cop_per_usdt": None,
+            "reference_rate_source": None,
+            "reference_rate_date": None,
+            "spread_profit_cop_estimated": None,
+        }
+    return {
+        "reference_rate_cop_per_usdt": trm["reference_rate"],
+        "reference_rate_source": trm["source"],
+        "reference_rate_date": trm.get("reference_rate_date"),
+        "spread_profit_cop_estimated": estimate_spread_profit_cop(amount_cop, sell_price, trm["reference_rate"]),
+    }
+
+
+def get_checkout_reference_rate() -> dict | None:
+    return get_cached_seticap_trm()
+
+
+def refresh_checkout_reference_rate_async(
+    store: OrderStore,
+    external_id: str,
+    amount_cop: int | float,
+    sell_price: float,
+) -> None:
+    def refresh() -> None:
+        try:
+            trm = refresh_seticap_trm_cache()
+            order = store.get_order(external_id)
+            if order is None or order.payment_request_id is None or order.payment_amount is None:
+                return
+            spread = build_spread_payload(amount_cop, sell_price, trm)
+            store.update_payment_request(
+                external_id=order.external_id,
+                payment_request_id=order.payment_request_id,
+                payment_url=order.payment_url or "",
+                payment_status=order.payment_status,
+                payment_currency=order.payment_currency,
+                payment_amount=order.payment_amount,
+                sell_price_cop_per_usdt=order.sell_price_cop_per_usdt,
+                reference_rate_cop_per_usdt=spread["reference_rate_cop_per_usdt"],
+                reference_rate_source=spread["reference_rate_source"],
+                reference_rate_date=spread["reference_rate_date"],
+                spread_profit_cop_estimated=spread["spread_profit_cop_estimated"],
+            )
+            store.add_event(order.external_id, "reference_rate.updated", spread)
+        except Exception:
+            pass
+
+    threading.Thread(target=refresh, daemon=True).start()
 
 
 def _parse_dt(value: str | None) -> datetime | None:
@@ -561,16 +615,15 @@ def create_app(
 
         for attempt_number in range(1, max_attempts + 1):
             sell_price = getattr(coinsenda_client, "get_usdt_cop_sell_price", get_usdt_cop_sell_price)()
-            trm = get_seticap_trm()
-            spread_profit_cop_estimated = estimate_spread_profit_cop(payload.amount_cop, sell_price, trm["reference_rate"])
+            spread = build_spread_payload(payload.amount_cop, sell_price, get_checkout_reference_rate())
             order_payload = CreateOrderRequest(
                 client_id=payload.client_id,
                 customer_id=account.customer_id if account else None,
                 amount_cop_gross=payload.amount_cop,
                 estimated_rate_cop_per_usdt=sell_price,
-                reference_rate_cop_per_usdt=trm["reference_rate"],
-                reference_rate_source=trm["source"],
-                reference_rate_date=trm.get("reference_rate_date"),
+                reference_rate_cop_per_usdt=spread["reference_rate_cop_per_usdt"],
+                reference_rate_source=spread["reference_rate_source"],
+                reference_rate_date=spread["reference_rate_date"],
             )
             order = build_order(order_payload, settings.fee_percent)
             store.put_order(order)
@@ -595,13 +648,20 @@ def create_app(
                 payment_currency="usdt",
                 payment_amount=payment_amount,
                 sell_price_cop_per_usdt=sell_price,
-                reference_rate_cop_per_usdt=trm["reference_rate"],
-                reference_rate_source=trm["source"],
-                reference_rate_date=trm.get("reference_rate_date"),
-                spread_profit_cop_estimated=spread_profit_cop_estimated,
+                reference_rate_cop_per_usdt=spread["reference_rate_cop_per_usdt"],
+                reference_rate_source=spread["reference_rate_source"],
+                reference_rate_date=spread["reference_rate_date"],
+                spread_profit_cop_estimated=spread["spread_profit_cop_estimated"],
             )
             if updated_order is None:
                 raise HTTPException(status_code=404, detail="Order not found")
+            if spread["reference_rate_source"] is None or spread["reference_rate_source"] == "seticap-cache-stale":
+                refresh_checkout_reference_rate_async(
+                    store,
+                    updated_order.external_id,
+                    updated_order.amount_cop_gross,
+                    sell_price,
+                )
             store.add_event(
                 updated_order.external_id,
                 "payment_request.created",
@@ -613,10 +673,10 @@ def create_app(
                     "payment_currency": "usdt",
                     "payment_amount": payment_amount,
                     "sell_price_cop_per_usdt": sell_price,
-                    "reference_rate_cop_per_usdt": trm["reference_rate"],
-                    "reference_rate_source": trm["source"],
-                    "reference_rate_date": trm.get("reference_rate_date"),
-                    "spread_profit_cop_estimated": spread_profit_cop_estimated,
+                    "reference_rate_cop_per_usdt": spread["reference_rate_cop_per_usdt"],
+                    "reference_rate_source": spread["reference_rate_source"],
+                    "reference_rate_date": spread["reference_rate_date"],
+                    "spread_profit_cop_estimated": spread["spread_profit_cop_estimated"],
                     "fee_asset": updated_order.fee_asset,
                     "coinsenda": payment_request.raw,
                 },
@@ -641,10 +701,10 @@ def create_app(
                 "customer_id": updated_order.customer_id,
                 "payment_request_id": updated_order.payment_request_id,
                 "sell_price_cop_per_usdt": sell_price,
-                "reference_rate_cop_per_usdt": trm["reference_rate"],
-                "reference_rate_source": trm["source"],
-                "reference_rate_date": trm.get("reference_rate_date"),
-                "spread_profit_cop_estimated": spread_profit_cop_estimated,
+                "reference_rate_cop_per_usdt": spread["reference_rate_cop_per_usdt"],
+                "reference_rate_source": spread["reference_rate_source"],
+                "reference_rate_date": spread["reference_rate_date"],
+                "spread_profit_cop_estimated": spread["spread_profit_cop_estimated"],
                 "payment_amount": updated_order.payment_amount,
                 "pay_amount_cop": instructions.get("amount_cop_text"),
                 "pay_amount_cop_numeric": pay_amount_cop,
