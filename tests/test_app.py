@@ -889,6 +889,56 @@ def test_portfolio_value_uses_coinsenda_sell_price_plus_configured_markup(monkey
     assert portfolio["estimated_value_cop"] == 15571.66
 
 
+
+def test_admin_order_detail_shows_exchange_rates(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    monkeypatch.setattr(app_module, "get_usdt_cop_sell_price", lambda: 3423.91)
+    client = make_client_with_coinsenda(tmp_path, SlippageCoinsendaClient())
+
+    checkout = client.post(
+        "/checkout",
+        json={
+            "client_id": "cli-rates",
+            "amount_cop": 5000,
+            "expiration_minutes": 45,
+            "max_retries": 0,
+        },
+    ).json()
+
+    response = client.get(f"/admin/orders/{checkout['external_id']}")
+
+    assert response.status_code == 200
+    assert "Tasas aplicadas" in response.text
+    assert "Coinsenda venta" in response.text
+    assert "3,423.91 COP/USDT" in response.text
+    assert "Referencia" in response.text
+    assert "seticap-test" in response.text
+    assert "Spread estimado" in response.text
+
+
+def test_admin_orders_table_shows_exchange_rate_columns(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    monkeypatch.setattr(app_module, "get_usdt_cop_sell_price", lambda: 3527.5)
+    client = make_client_with_coinsenda(tmp_path, SlippageCoinsendaClient())
+    client.post(
+        "/checkout",
+        json={
+            "client_id": "cli-rate-list",
+            "amount_cop": 5000,
+            "expiration_minutes": 45,
+            "max_retries": 0,
+        },
+    )
+
+    response = client.get("/admin/orders")
+
+    assert response.status_code == 200
+    assert "Coinsenda" in response.text
+    assert "Referencia" in response.text
+    assert "3,527.50 COP/USDT" in response.text
+
 def test_admin_orders_shows_attention_queue(tmp_path) -> None:
     client = make_client(tmp_path)
     order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()

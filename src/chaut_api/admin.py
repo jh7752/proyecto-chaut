@@ -275,6 +275,8 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     .order-money {{ text-align:right; min-width:112px; }}
     .order-money strong {{ display:block; font-size:22px; letter-spacing:-.04em; line-height:1; }}
     .order-time {{ color:#8888a0; font-size:13px; line-height:1.35; overflow-wrap:anywhere; }}
+    .order-rate {{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; color:var(--leaf); font-size:12px; line-height:1.35; }}
+    .order-rate strong {{ color:var(--ink); font-weight:850; }}
     [data-theme="dark"] .order-time {{ color:#9898b8; }}
     .orders-split {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; align-items:start; }}
     .orders-panel {{ min-width:0; }}
@@ -294,6 +296,10 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     .score-bar span {{ display:block; height:100%; width:calc(var(--score) * 1%); border-radius:inherit; background:linear-gradient(90deg,var(--leaf),var(--gold)); }}
     .orders-panel .section-head {{ margin:0 0 10px; }}
     .split {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.45fr); gap:16px; align-items:start; }}
+    .split.rates-layout {{ grid-template-columns:minmax(260px,.7fr) minmax(280px,.55fr) minmax(360px,1fr); }}
+    .rate-card {{ border-color:rgba(212,168,83,.34); background:linear-gradient(135deg,rgba(247,228,160,.78),rgba(255,255,255,.88)); }}
+    [data-theme="dark"] .rate-card {{ background:linear-gradient(135deg,rgba(212,168,83,.18),rgba(255,255,255,.07)); }}
+    .rate-card .kv b {{ font-size:16px; }}
     .profile-tabs {{ margin-top:14px; display:grid; gap:14px; }}
     .tab-nav {{ display:flex; flex-wrap:wrap; gap:9px; padding:8px; border:1px solid var(--line); border-radius:16px; background:rgba(255,255,255,.5); width:max-content; max-width:100%; }}
     [data-theme="dark"] .tab-nav {{ background:rgba(255,255,255,.06); }}
@@ -469,7 +475,7 @@ def admin_order_detail(
     if order.customer_id:
         portfolio_link = f'<a class="button" href="/admin/accounts/{escape(order.customer_id)}{_token_qs(token)}">Ver usuario</a>'
     body = f"""
-    <div class="split">
+    <div class="split rates-layout">
       <div class="card">
         <p class="muted">Orden</p><div class="metric"><code>{escape(order.external_id)}</code></div>
         <p><b>Usuario:</b> <code>{escape(order.customer_id or "-")}</code></p>
@@ -480,8 +486,19 @@ def admin_order_detail(
       <div class="card">
         <p class="muted">Monto</p>
         <div class="metric">{order.amount_cop_gross:,.0f} COP</div>
-        <p><b>USDT:</b> {order.payment_amount or 0}</p>
+        <p><b>USDT:</b> {format_decimal(order.payment_amount, 6)}</p>
         <p><b>Creada:</b> {format_bogota_time(order.created_at)}</p>
+      </div>
+      <div class="card rate-card">
+        <p class="muted">Tasas aplicadas</p>
+        <div class="kv-grid">
+          <div class="kv"><span class="muted">Coinsenda venta</span><b>{format_rate(order.sell_price_cop_per_usdt)}</b></div>
+          <div class="kv"><span class="muted">Referencia</span><b>{format_rate(order.reference_rate_cop_per_usdt)}</b></div>
+          <div class="kv"><span class="muted">Fuente</span><b>{escape(order.reference_rate_source or "-")}</b></div>
+          <div class="kv"><span class="muted">Fecha ref.</span><b>{escape(order.reference_rate_date or "-")}</b></div>
+          <div class="kv"><span class="muted">USDT cobrado</span><b>{format_decimal(order.payment_amount, 6)}</b></div>
+          <div class="kv"><span class="muted">Spread estimado</span><b>{format_cop(order.spread_profit_cop_estimated)}</b></div>
+        </div>
       </div>
     </div>
     <div class="section-head"><h2>Timeline de eventos</h2><span class="badge">{len(events)} eventos</span></div>
@@ -649,7 +666,8 @@ def order_cards(
             f'<article class="order-card{legacy_class}{attention_class}">'
             f'<div class="order-main"><a class="order-id" href="/admin/orders/{escape(order.external_id)}{_token_qs(token)}"><code>{escape(order.external_id)}</code></a>'
             f'<div class="order-meta"><code>{customer}</code>{status_pill(order.payment_status)}{conversion_pill(order.conversion_status)}{attention_pill(order)}</div>'
-            f'<div class="order-time">{escape(date_label)}: {format_bogota_time(main_date)} · {escape(secondary_label)}: {format_bogota_time(secondary_date)}</div></div>'
+            f'<div class="order-time">{escape(date_label)}: {format_bogota_time(main_date)} · {escape(secondary_label)}: {format_bogota_time(secondary_date)}</div>'
+            f'<div class="order-rate"><span class="muted">Coinsenda</span> <strong>{format_rate(order.sell_price_cop_per_usdt)}</strong> <span class="muted">Ref.</span> <strong>{format_rate(order.reference_rate_cop_per_usdt)}</strong></div></div>'
             f'<div class="order-money"><strong>{order.amount_cop_gross:,.0f}</strong><span class="muted">COP</span></div>'
             "</article>"
         )
@@ -676,15 +694,16 @@ def orders_table(
         )
         rows.append(
             f"<tr{row_class}><td><a class='order-id' href='/admin/orders/{escape(order.external_id)}{_token_qs(token)}'><code>{escape(order.external_id)}</code></a></td>"
-            f"<td><code>{customer}</code></td><td class='money'>{order.amount_cop_gross:,.0f}</td><td>{order.payment_amount or ''}</td>"
+            f"<td><code>{customer}</code></td><td class='money'>{order.amount_cop_gross:,.0f}</td><td>{format_decimal(order.payment_amount, 6)}</td>"
+            f"<td>{format_rate(order.sell_price_cop_per_usdt)}</td><td>{format_rate(order.reference_rate_cop_per_usdt)}</td>"
             f"<td>{status_pill(order.payment_status)}</td><td>{conversion_pill(order.conversion_status)}</td>"
             f"<td>{attention_pill(order)}</td>"
             f"<td class='date'>{escape(date_label)}: {format_bogota_time(main_date)}<br><span class='muted'>{escape(secondary_label)}: {format_bogota_time(secondary_date)}</span></td></tr>"
         )
     if not rows:
-        rows.append("<tr><td colspan='8' class='empty'>Sin registros.</td></tr>")
+        rows.append("<tr><td colspan='10' class='empty'>Sin registros.</td></tr>")
     return (
-        "<div class='table-wrap'><table><thead><tr><th>Orden</th><th>Usuario</th><th>COP</th><th>USDT</th><th>Pago</th><th>XAUT</th><th>Operacion</th><th>Fecha operativa</th></tr></thead><tbody>"
+        "<div class='table-wrap'><table><thead><tr><th>Orden</th><th>Usuario</th><th>COP</th><th>USDT</th><th>Coinsenda</th><th>Referencia</th><th>Pago</th><th>XAUT</th><th>Operacion</th><th>Fecha operativa</th></tr></thead><tbody>"
         + "".join(rows)
         + "</tbody></table></div>"
     )
@@ -802,6 +821,24 @@ def commission_table(rows: list[dict]) -> str:
         + "</tbody></table></div>"
     )
 
+
+
+def format_decimal(value, places: int = 2) -> str:
+    if value is None:
+        return "-"
+    return f"{float(value):,.{places}f}"
+
+
+def format_rate(value) -> str:
+    if value is None:
+        return "-"
+    return f"{float(value):,.2f} COP/USDT"
+
+
+def format_cop(value) -> str:
+    if value is None:
+        return "-"
+    return f"{float(value):,.2f} COP"
 
 def metric_card(label: str, value) -> str:
     icons = {
