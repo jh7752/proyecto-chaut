@@ -14,6 +14,7 @@ PENDING_NAMES: dict[int, bool] = {}
 PENDING_CUSTOM_AMOUNTS: set[int] = set()
 PENDING_SETTLEMENTS: set[str] = set()
 PENDING_WITHDRAWAL_KEYS: dict[int, dict[str, Any]] = {}
+PENDING_PARTIAL_WITHDRAWALS: set[int] = set()
 NOTIFIED_WITHDRAWALS: set[str] = set()
 
 
@@ -44,6 +45,8 @@ def handle_update(update: dict[str, Any]) -> None:
         register_name(chat_id, user, text)
     elif PENDING_CUSTOM_AMOUNTS.__contains__(chat_id) and text and not text.startswith("/"):
         handle_custom_amount(chat_id, user, text)
+    elif chat_id in PENDING_PARTIAL_WITHDRAWALS and text and not text.startswith("/"):
+        handle_partial_withdrawal_amount(chat_id, user, text)
     elif chat_id in PENDING_WITHDRAWAL_KEYS and text and not text.startswith("/"):
         handle_withdrawal_key(chat_id, user, text)
     elif text.startswith("/start"):
@@ -111,13 +114,14 @@ def handle_callback(callback: dict[str, Any]) -> None:
     elif data == "withdraw:all":
         ask_withdrawal_key(chat_id, user)
     elif data == "withdraw:custom":
-        send_text(chat_id, "Por ahora solo puedes retirar todo el oro disponible.", buttons=[[{"text": "Retirar todo", "callback_data": "withdraw:all"}, {"text": "Cancelar", "callback_data": "withdraw:cancel"}]])
+        ask_partial_withdrawal_amount(chat_id, user)
     elif data == "withdraw:change_key":
         ask_withdrawal_key(chat_id, user)
     elif data == "withdraw:confirm":
         confirm_withdrawal(chat_id, user)
     elif data == "withdraw:cancel":
         PENDING_WITHDRAWAL_KEYS.pop(chat_id, None)
+        PENDING_PARTIAL_WITHDRAWALS.discard(chat_id)
         send_text(chat_id, "Retiro cancelado.")
 
 
@@ -355,6 +359,66 @@ def start_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
     )
 
 
+def ask_partial_withdrawal_amount(chat_id: int, user: dict[str, Any]) -> None:
+    try:
+        portfolio = portfolio_for_user(chat_id, user)
+    except Exception:
+        portfolio = None
+    if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:
+        send_text(chat_id, "Aún no tienes oro digital disponible para retirar.")
+        return
+    estimated_cop = portfolio.get("estimated_value_cop") or 0
+    PENDING_PARTIAL_WITHDRAWALS.add(chat_id)
+    send_text(
+        chat_id,
+        f"¿Cuánto quieres retirar?\n\nDisponible: {portfolio['gold_grams_net']:.12f} g"
+        + (f" (~{format_cop(estimated_cop)} COP)" if estimated_cop else "")
+        + "\n\nEscribe el monto en COP. Ejemplo: 50.000",
+        buttons=[[{"text": "Cancelar", "callback_data": "withdraw:cancel"}]],
+    )
+
+
+def handle_partial_withdrawal_amount(chat_id: int, user: dict[str, Any], text: str) -> None:
+    amount_cop = parse_cop_input(text)
+    if amount_cop is None or amount_cop <= 0:
+        send_text(chat_id, "No pude leer ese monto. Escríbelo así, porfa: 50.000")
+        return
+    PENDING_PARTIAL_WITHDRAWALS.discard(chat_id)
+    try:
+        portfolio = portfolio_for_user(chat_id, user)
+    except Exception:
+        portfolio = None
+    if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:
+        send_text(chat_id, "Aún no tienes oro digital disponible para retirar.")
+        return
+    estimated_cop = portfolio.get("estimated_value_cop") or 0
+    if estimated_cop > 0 and amount_cop >= estimated_cop:
+        # Requesting all or more → treat as full withdrawal
+        ask_withdrawal_key(chat_id, user)
+        return
+    # Calculate proportional XAUT
+    if estimated_cop <= 0:
+        send_text(chat_id, "No pude calcular el valor de tu oro. Intenta más tarde.")
+        return
+    ratio = amount_cop / estimated_cop
+    partial_xaut = portfolio["xaut_net"] * ratio
+    partial_grams = portfolio["gold_grams_net"] * ratio
+    PENDING_WITHDRAWAL_KEYS[chat_id] = {
+        "portfolio": portfolio,
+        "partial_xaut": partial_xaut,
+        "partial_grams": partial_grams,
+        "partial_cop": amount_cop,
+        "amount_mode": "partial",
+    }
+    send_text(
+        chat_id,
+        f"Retiro parcial\n\nMonto: {format_cop(amount_cop)} COP\n"
+        f"Equivalente: {partial_grams:.12f} g de oro\n\n"
+        "¿A qué llave Bre-B enviamos el dinero?\n\nEscribe tu llave Bre-B.",
+        buttons=[[{"text": "Cancelar", "callback_data": "withdraw:cancel"}]],
+    )
+
+
 def ask_withdrawal_key(chat_id: int, user: dict[str, Any]) -> None:
     try:
         portfolio = portfolio_for_user(chat_id, user)
@@ -385,12 +449,25 @@ def handle_withdrawal_key(chat_id: int, user: dict[str, Any], text: str) -> None
         PENDING_WITHDRAWAL_KEYS.pop(chat_id, None)
         send_text(chat_id, "Aún no tienes oro digital disponible para retirar.")
         return
-    request = {"portfolio": portfolio, "breb_key": breb_key}
+    # Preserve partial withdrawal info if coming from custom amount flow
+    partial_xaut = request.get("partial_xaut")
+    partial_grams = request.get("partial_grams")
+    partial_cop = request.get("partial_cop")
+    amount_mode = request.get("amount_mode", "all")
+    request = {"portfolio": portfolio, "breb_key": breb_key, "amount_mode": amount_mode}
+    if partial_xaut is not None:
+        request["partial_xaut"] = partial_xaut
+        request["partial_grams"] = partial_grams
+        request["partial_cop"] = partial_cop
     PENDING_WITHDRAWAL_KEYS[chat_id] = request
-    estimated_cop = portfolio.get("estimated_value_cop")
     lines = ["Confirmar retiro", ""]
-    if estimated_cop is not None:
-        lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
+    if amount_mode == "partial" and partial_cop is not None:
+        lines.append(f"Monto: {format_cop(partial_cop)} COP")
+        lines.append(f"Equivalente: {partial_grams:.12f} g de oro")
+    else:
+        estimated_cop = portfolio.get("estimated_value_cop")
+        if estimated_cop is not None:
+            lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
     lines.extend([f"Llave Bre-B: {breb_key}", "", "¿Confirmas?"])
     send_text(
         chat_id,
@@ -409,15 +486,22 @@ def confirm_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
         return
     try:
         account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
+        amount_mode = request.get("amount_mode", "all")
         payload = {
             "customer_id": account["customer_id"],
             "provider": "telegram",
             "provider_user_id": str(user.get("id", chat_id)),
             "chat_id": str(chat_id),
             "breb_key": request["breb_key"],
-            "amount_mode": "all",
+            "amount_mode": amount_mode,
             "portfolio_snapshot": request.get("portfolio", {}),
         }
+        if amount_mode == "partial" and request.get("partial_xaut") is not None:
+            payload["portfolio_snapshot"] = {
+                **request.get("portfolio", {}),
+                "xaut_net": request["partial_xaut"],
+                "gold_grams_net": request["partial_grams"],
+            }
         withdrawal = api("POST", "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL", payload)
     except Exception as exc:
         send_text(chat_id, f"No pude registrar el retiro. Intenta de nuevo en un momento.\n\nDetalle: {friendly_api_error(exc)}")
@@ -427,7 +511,7 @@ def confirm_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
     if estimated_cop is not None:
         lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
     if withdrawal.get("status") == "xaut_sold":
-        lines.append("Ya vendimos tu oro digital. Ahora haremos el pago manual a tu llave Bre-B.")
+        lines.append("Ya vendimos tu oro digital. Ahora haremos el pago a tu llave Bre-B.")
     elif withdrawal.get("status") == "failed":
         lines.append("No pudimos procesar la venta en este momento. Te avisaremos cuando lo revisemos.")
     else:

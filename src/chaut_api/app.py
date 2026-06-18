@@ -451,6 +451,15 @@ def create_app(
             requested_xaut = float(payload.portfolio_snapshot.get("xaut_net") or portfolio.xaut_net)
             if requested_xaut - available_xaut > 0.000000000001:
                 raise HTTPException(status_code=409, detail="Cannot withdraw more than available balance")
+        # Determine actual withdrawal amounts
+        if payload.amount_mode == "partial" and payload.portfolio_snapshot.get("xaut_net") is not None:
+            withdraw_xaut = float(payload.portfolio_snapshot["xaut_net"])
+            withdraw_grams = float(payload.portfolio_snapshot.get("gold_grams_net") or 0)
+            if withdraw_xaut <= 0 or withdraw_xaut > available_xaut + 0.000000000001:
+                raise HTTPException(status_code=409, detail="Invalid partial withdrawal amount")
+        else:
+            withdraw_xaut = portfolio.xaut_net
+            withdraw_grams = portfolio.gold_grams_net
         withdrawal = store.create_withdrawal(WithdrawalResponse(
             withdrawal_id=f"wd-{uuid4().hex[:12]}",
             customer_id=payload.customer_id,
@@ -459,9 +468,9 @@ def create_app(
             chat_id=payload.chat_id,
             breb_key=" ".join(payload.breb_key.split()),
             amount_mode=payload.amount_mode,
-            gold_grams=portfolio.gold_grams_net,
-            xaut_amount=portfolio.xaut_net,
-            estimated_value_cop=portfolio.estimated_value_cop,
+            gold_grams=withdraw_grams,
+            xaut_amount=withdraw_xaut,
+            estimated_value_cop=(portfolio.estimated_value_cop * withdraw_xaut / portfolio.xaut_net) if portfolio.estimated_value_cop and portfolio.xaut_net and payload.amount_mode == "partial" else portfolio.estimated_value_cop,
             status="requested",
             created_at=datetime.now(UTC).isoformat(),
         ))

@@ -1348,3 +1348,48 @@ def test_withdrawal_blocks_double_spend_when_first_is_pending(monkeypatch, tmp_p
     )
     assert second.status_code == 409
     assert "pending withdrawal" in second.json()["detail"] or "No gold available" in second.json()["detail"]
+
+
+def test_partial_withdrawal_extracts_only_requested_xaut(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    sold_amounts = []
+
+    class StubHtxPrivateClient:
+        def place_market_sell(self, symbol, amount):
+            sold_amounts.append(float(amount))
+            return {"status": "ok", "data": "sell-partial-1"}
+
+        def order(self, order_id):
+            amt = str(sold_amounts[0]) if sold_amounts else "0"
+            cash = str(sold_amounts[0] * 4666.67) if sold_amounts else "0"
+            return {"status": "ok", "data": {"id": order_id, "state": "filled", "field-amount": amt, "field-cash-amount": cash, "field-fees": "0"}}
+
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    client = make_client(tmp_path)
+    account = _seed_withdrawable_account(client, tmp_path, "partial-user")
+
+    # Partial withdrawal: request only half the XAUT
+    response = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={
+            "customer_id": account["customer_id"],
+            "provider": "telegram",
+            "provider_user_id": "partial-user",
+            "breb_key": "@brebPartial",
+            "amount_mode": "partial",
+            "portfolio_snapshot": {"xaut_net": 0.00015, "gold_grams_net": 0.004665521520},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "xaut_sold"
+    assert body["amount_mode"] == "partial"
+    assert body["xaut_amount"] == pytest.approx(0.00015)
+    assert len(sold_amounts) == 1
+    assert sold_amounts[0] == pytest.approx(0.00015)
+
+    # Portfolio should still have remaining balance
+    portfolio = client.get(f"/accounts/{account['customer_id']}/portfolio").json()
+    assert portfolio["xaut_net"] > 0

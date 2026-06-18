@@ -222,7 +222,7 @@ class WithdrawalRequest(BaseModel):
     provider_user_id: str = Field(min_length=1)
     chat_id: str | None = None
     breb_key: str = Field(min_length=3, max_length=120)
-    amount_mode: str = Field(default="all", pattern="^all$")
+    amount_mode: str = Field(default="all", pattern="^all|partial$")
     portfolio_snapshot: dict = Field(default_factory=dict)
 
 
