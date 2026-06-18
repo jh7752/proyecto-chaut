@@ -440,9 +440,16 @@ def create_app(
         portfolio = _with_estimated_portfolio_value(store.get_portfolio(payload.customer_id), settings, coinsenda_client)
         if portfolio.gold_grams_net <= 0 or portfolio.xaut_net <= 0:
             raise HTTPException(status_code=409, detail="No gold available to withdraw")
+        # Subtract pending withdrawals to prevent double-spending
+        pending = [w for w in store.list_withdrawals(limit=500)
+                   if w.customer_id == payload.customer_id and w.status in {"requested", "selling_xaut", "xaut_sold", "paying_cop"}]
+        pending_xaut = sum(w.xaut_amount for w in pending)
+        available_xaut = portfolio.xaut_net - pending_xaut
+        if available_xaut <= 0:
+            raise HTTPException(status_code=409, detail="You already have a pending withdrawal")
         if payload.portfolio_snapshot:
             requested_xaut = float(payload.portfolio_snapshot.get("xaut_net") or portfolio.xaut_net)
-            if requested_xaut - portfolio.xaut_net > 0.000000000001:
+            if requested_xaut - available_xaut > 0.000000000001:
                 raise HTTPException(status_code=409, detail="Cannot withdraw more than available balance")
         withdrawal = store.create_withdrawal(WithdrawalResponse(
             withdrawal_id=f"wd-{uuid4().hex[:12]}",

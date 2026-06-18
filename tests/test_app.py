@@ -1317,3 +1317,34 @@ def test_trm_uses_stale_seticap_cache_when_fetch_fails(monkeypatch, tmp_path) ->
     assert trm["reference_rate"] == 3448.35
     assert trm["source"] == "seticap-cache-stale"
     assert trm["reference_rate_source"] == "seticap-close"
+
+
+def test_withdrawal_blocks_double_spend_when_first_is_pending(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class StubHtxPrivateClient:
+        def place_market_sell(self, symbol, amount):
+            return {"status": "ok", "data": "sell-ds-1"}
+
+        def order(self, order_id):
+            return {"status": "ok", "data": {"id": order_id, "state": "filled", "field-amount": "0.0003", "field-cash-amount": "1.4", "field-fees": "0"}}
+
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    client = make_client(tmp_path)
+    account = _seed_withdrawable_account(client, tmp_path, "double-spend")
+
+    # First withdrawal succeeds (status xaut_sold, awaiting manual COP payment)
+    first = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={"customer_id": account["customer_id"], "provider": "telegram", "provider_user_id": "double-spend", "breb_key": "@breb1", "portfolio_snapshot": {"xaut_net": 0.0003}},
+    )
+    assert first.status_code == 200
+    assert first.json()["status"] == "xaut_sold"
+
+    # Second withdrawal should be blocked: available balance is 0 after pending
+    second = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={"customer_id": account["customer_id"], "provider": "telegram", "provider_user_id": "double-spend", "breb_key": "@breb2", "portfolio_snapshot": {"xaut_net": 0.0003}},
+    )
+    assert second.status_code == 409
+    assert "pending withdrawal" in second.json()["detail"] or "No gold available" in second.json()["detail"]
