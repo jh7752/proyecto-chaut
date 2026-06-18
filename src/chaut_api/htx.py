@@ -88,6 +88,21 @@ class HtxPrivateClient:
         )
         return self._request("POST", "/v1/order/orders/place", body=body)
 
+    def place_market_sell(self, symbol: str, amount: str) -> dict:
+        account_id = self.spot_account_id()
+        body = json.dumps(
+            {
+                "account-id": account_id,
+                "symbol": symbol,
+                "type": "sell-market",
+                "amount": amount,
+                "client-order-id": f"chaut-wd-{int(time.time() * 1000)}",
+                "source": "spot-api",
+            },
+            separators=(",", ":"),
+        )
+        return self._request("POST", "/v1/order/orders/place", body=body)
+
     def order(self, order_id: str) -> dict:
         return self._request("GET", f"/v1/order/orders/{order_id}")
 
@@ -140,6 +155,9 @@ class SsmHtxPrivateClient:
 
     def place_market_buy(self, symbol: str, funds: str) -> dict:
         return self._run_worker("place_market_buy", {"symbol": symbol, "funds": funds})
+
+    def place_market_sell(self, symbol: str, amount: str) -> dict:
+        return self._run_worker("place_market_sell", {"symbol": symbol, "amount": amount})
 
     def order(self, order_id: str) -> dict:
         return self._run_worker("order", {"order_id": order_id})
@@ -233,6 +251,9 @@ elif action == "balance":
 elif action == "place_market_buy":
     body = json.dumps({{"account-id": spot_account_id(), "symbol": params["symbol"], "type": "buy-market", "amount": params["funds"], "client-order-id": "chaut-htx-" + str(int(time.time() * 1000)), "source": "spot-api"}}, separators=(",", ":"))
     payload = call("POST", "/v1/order/orders/place", body)
+elif action == "place_market_sell":
+    body = json.dumps({"account-id": spot_account_id(), "symbol": params["symbol"], "type": "sell-market", "amount": params["amount"], "client-order-id": "chaut-wd-" + str(int(time.time() * 1000)), "source": "spot-api"}, separators=(",", ":"))
+    payload = call("POST", "/v1/order/orders/place", body)
 elif action == "order":
     payload = call("GET", "/v1/order/orders/" + str(params["order_id"]))
 else:
@@ -284,6 +305,18 @@ def prepare_xaut_market_buy(
         "ask_price": str(ask),
         "min_order_value": str(min_order_value),
         "status": "prepared",
+    }
+
+
+def summarize_sold_order(order_payload: dict) -> dict:
+    data = order_payload.get("data", {})
+    return {
+        "order_id": str(data.get("id")) if data.get("id") is not None else None,
+        "state": data.get("state"),
+        "field_amount": str(data.get("field-amount") or "0"),
+        "field_cash_amount": str(data.get("field-cash-amount") or "0"),
+        "field_fees": str(data.get("field-fees") or "0"),
+        "raw": data,
     }
 
 

@@ -12,6 +12,7 @@ from .admin import (
     admin_login_page,
     admin_order_detail,
     admin_orders,
+    admin_withdrawals,
     clear_admin_session_response,
     create_admin_session_response,
     require_admin,
@@ -26,6 +27,7 @@ from .htx import (
     quote_xaut_from_usdt,
     summarize_accounts as summarize_htx_accounts,
     summarize_filled_order,
+    summarize_sold_order,
 )
 from .kucoin import (
     create_kucoin_client,
@@ -55,6 +57,9 @@ from .models import (
     OrderResponse,
     PortfolioResponse,
     PaymentInstructionsResponse,
+    WithdrawalMarkFailedRequest,
+    WithdrawalPaymentConfirmationRequest,
+    WithdrawalDetailResponse,
     WithdrawalRequest,
     WithdrawalResponse,
     XautQuoteResponse,
@@ -338,6 +343,25 @@ def create_app(
         )
         return _admin_redirect(external_id, token, redirect)
 
+    @app.get("/admin/withdrawals")
+    def admin_withdrawals_page(request: Request):
+        token = require_admin_access(request)
+        return admin_withdrawals(store, token)
+
+    @app.post("/admin/withdrawals/{withdrawal_id}/confirm-payment")
+    def admin_confirm_withdrawal_payment(withdrawal_id: str, request: Request, cop_paid: float = Form(...), cop_tx_ref: str = Form(...), admin_note: str | None = Form(None)):
+        token = require_admin_access(request)
+        confirm_withdrawal_payment(withdrawal_id, WithdrawalPaymentConfirmationRequest(cop_paid=cop_paid, cop_tx_ref=cop_tx_ref, admin_note=admin_note))
+        suffix = f"?token={token}" if token else ""
+        return RedirectResponse(f"/admin/withdrawals{suffix}", status_code=303)
+
+    @app.post("/admin/withdrawals/{withdrawal_id}/mark-failed")
+    def admin_mark_withdrawal_failed(withdrawal_id: str, request: Request, reason: str = Form(...), admin_note: str | None = Form(None)):
+        token = require_admin_access(request)
+        mark_withdrawal_failed(withdrawal_id, WithdrawalMarkFailedRequest(reason=reason, admin_note=admin_note))
+        suffix = f"?token={token}" if token else ""
+        return RedirectResponse(f"/admin/withdrawals{suffix}", status_code=303)
+
     @app.get("/admin/accounts")
     def admin_accounts_page(request: Request):
         token = require_admin_access(request)
@@ -403,8 +427,10 @@ def create_app(
             raise HTTPException(status_code=404, detail="Account not found")
         return _with_estimated_portfolio_value(store.get_portfolio(account.customer_id), settings, coinsenda_client)
 
-    @app.post("/withdrawals", response_model=WithdrawalResponse)
-    def create_withdrawal_request(payload: WithdrawalRequest) -> WithdrawalResponse:
+    @app.post("/withdrawals", response_model=WithdrawalDetailResponse)
+    def create_withdrawal_request(payload: WithdrawalRequest, confirm: str = "") -> WithdrawalDetailResponse:
+        if confirm != "EXECUTE_WITHDRAWAL_XAUT_SELL":
+            raise HTTPException(status_code=409, detail="Missing explicit EXECUTE_WITHDRAWAL_XAUT_SELL confirmation")
         account = store.get_account(payload.customer_id)
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
@@ -414,7 +440,11 @@ def create_app(
         portfolio = _with_estimated_portfolio_value(store.get_portfolio(payload.customer_id), settings, coinsenda_client)
         if portfolio.gold_grams_net <= 0 or portfolio.xaut_net <= 0:
             raise HTTPException(status_code=409, detail="No gold available to withdraw")
-        withdrawal = WithdrawalResponse(
+        if payload.portfolio_snapshot:
+            requested_xaut = float(payload.portfolio_snapshot.get("xaut_net") or portfolio.xaut_net)
+            if requested_xaut - portfolio.xaut_net > 0.000000000001:
+                raise HTTPException(status_code=409, detail="Cannot withdraw more than available balance")
+        withdrawal = store.create_withdrawal(WithdrawalResponse(
             withdrawal_id=f"wd-{uuid4().hex[:12]}",
             customer_id=payload.customer_id,
             provider=payload.provider,
@@ -427,17 +457,112 @@ def create_app(
             estimated_value_cop=portfolio.estimated_value_cop,
             status="requested",
             created_at=datetime.now(UTC).isoformat(),
-        )
+        ))
         store.add_event(
-            payload.customer_id,
+            withdrawal.withdrawal_id,
             "withdrawal.requested",
-            {
-                **withdrawal.model_dump(),
-                "portfolio_snapshot": portfolio.model_dump(),
-                "client_snapshot": payload.portfolio_snapshot,
-            },
+            {**withdrawal.model_dump(), "portfolio_snapshot": portfolio.model_dump(), "client_snapshot": payload.portfolio_snapshot},
         )
+        withdrawal = store.update_withdrawal_status(withdrawal.withdrawal_id, "selling_xaut")
+        if withdrawal is None:
+            raise HTTPException(status_code=404, detail="Withdrawal not found")
+        store.add_event(withdrawal.withdrawal_id, "withdrawal.selling_xaut", withdrawal.model_dump())
+        try:
+            client = create_htx_private_client(settings.htx_worker_instance_id, settings.htx_worker_region)
+            result = client.place_market_sell(settings.htx_xaut_symbol, str(withdrawal.xaut_amount))
+            order_id = str(result.get("data"))
+            order_detail = client.order(order_id)
+            fill = summarize_sold_order(order_detail)
+            if fill.get("state") != "filled":
+                raise RuntimeError(f"HTX sell order not filled: {fill.get('state')}")
+            usdt_received = float(fill.get("field_cash_amount") or 0)
+            xaut_sold = float(fill.get("field_amount") or withdrawal.xaut_amount)
+            sell_price = (usdt_received / xaut_sold) if xaut_sold else None
+            entry = store.add_withdrawal_ledger_entry(
+                withdrawal.withdrawal_id,
+                withdrawal.customer_id,
+                withdrawal.gold_grams,
+                withdrawal.xaut_amount,
+                usdt_received,
+                order_id,
+                {"withdrawal": withdrawal.model_dump(), "htx": result, "order": fill},
+            )
+            updated = store.update_withdrawal_status(
+                withdrawal.withdrawal_id,
+                "xaut_sold",
+                htx_order_id=order_id,
+                usdt_received=usdt_received,
+                xaut_sell_price=sell_price,
+                ledger_entry_id=entry.entry_id,
+                processed_at=datetime.now(UTC).isoformat(),
+            )
+            if updated is None:
+                raise HTTPException(status_code=404, detail="Withdrawal not found")
+            store.add_event(updated.withdrawal_id, "withdrawal.xaut_sold", {**updated.model_dump(), "ledger_entry": entry.model_dump(), "order": fill})
+            return updated
+        except HTTPException:
+            raise
+        except Exception as exc:
+            failed = store.update_withdrawal_status(
+                withdrawal.withdrawal_id,
+                "failed",
+                failure_reason=str(exc),
+                processed_at=datetime.now(UTC).isoformat(),
+            )
+            if failed is None:
+                raise HTTPException(status_code=404, detail="Withdrawal not found") from exc
+            store.add_event(failed.withdrawal_id, "withdrawal.failed", failed.model_dump())
+            return failed
+
+    @app.get("/withdrawals", response_model=list[WithdrawalDetailResponse])
+    def list_withdrawals(status_filter: str | None = None, limit: int = 100) -> list[WithdrawalDetailResponse]:
+        return store.list_withdrawals(status_filter, limit)
+
+    @app.get("/withdrawals/{withdrawal_id}", response_model=WithdrawalDetailResponse)
+    def get_withdrawal(withdrawal_id: str) -> WithdrawalDetailResponse:
+        withdrawal = store.get_withdrawal(withdrawal_id)
+        if withdrawal is None:
+            raise HTTPException(status_code=404, detail="Withdrawal not found")
         return withdrawal
+
+    @app.post("/withdrawals/{withdrawal_id}/confirm-payment", response_model=WithdrawalDetailResponse)
+    def confirm_withdrawal_payment(withdrawal_id: str, payload: WithdrawalPaymentConfirmationRequest) -> WithdrawalDetailResponse:
+        withdrawal = store.get_withdrawal(withdrawal_id)
+        if withdrawal is None:
+            raise HTTPException(status_code=404, detail="Withdrawal not found")
+        if withdrawal.status not in {"xaut_sold", "paying_cop"}:
+            raise HTTPException(status_code=409, detail=f"Withdrawal cannot be completed from status={withdrawal.status}")
+        paying = store.update_withdrawal_status(withdrawal_id, "paying_cop")
+        store.add_event(withdrawal_id, "withdrawal.paying_cop", paying.model_dump() if paying else {})
+        completed = store.update_withdrawal_status(
+            withdrawal_id,
+            "completed",
+            cop_paid=float(payload.cop_paid),
+            cop_tx_ref=payload.cop_tx_ref,
+            admin_note=payload.admin_note,
+            completed_at=datetime.now(UTC).isoformat(),
+        )
+        if completed is None:
+            raise HTTPException(status_code=404, detail="Withdrawal not found")
+        store.add_event(completed.withdrawal_id, "withdrawal.completed", completed.model_dump())
+        return completed
+
+    @app.post("/withdrawals/{withdrawal_id}/mark-failed", response_model=WithdrawalDetailResponse)
+    def mark_withdrawal_failed(withdrawal_id: str, payload: WithdrawalMarkFailedRequest) -> WithdrawalDetailResponse:
+        withdrawal = store.get_withdrawal(withdrawal_id)
+        if withdrawal is None:
+            raise HTTPException(status_code=404, detail="Withdrawal not found")
+        failed = store.update_withdrawal_status(
+            withdrawal_id,
+            "failed",
+            failure_reason=payload.reason,
+            admin_note=payload.admin_note,
+            processed_at=withdrawal.processed_at or datetime.now(UTC).isoformat(),
+        )
+        if failed is None:
+            raise HTTPException(status_code=404, detail="Withdrawal not found")
+        store.add_event(failed.withdrawal_id, "withdrawal.failed", failed.model_dump())
+        return failed
 
     @app.get("/htx/health")
     def htx_health() -> dict:

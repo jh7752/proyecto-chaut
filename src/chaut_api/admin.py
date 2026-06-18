@@ -363,7 +363,7 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
   <div class="mobile-topbar"><a class="side-brand" href="/admin{token_qs}"><span class="mark">Au</span><span class="brand-title">Chaut</span></a><button class="menu-toggle" type="button" onclick="toggleChautNav()" aria-label="Abrir navegacion">☰</button></div>
   <aside class="sidebar" aria-label="Navegacion principal">
     <a class="side-brand" href="/admin{token_qs}"><span class="mark">Au</span><span><span class="brand-title">Chaut</span><span class="eyebrow">Admin</span></span></a>
-    <nav class="side-nav"><a href="/admin{token_qs}"><span class="side-icon">□</span>Dashboard</a><a href="/admin/orders{token_qs}"><span class="side-icon">◇</span>Ordenes</a><a href="/admin/accounts{token_qs}"><span class="side-icon">○</span>Cuentas</a></nav>
+    <nav class="side-nav"><a href="/admin{token_qs}"><span class="side-icon">□</span>Dashboard</a><a href="/admin/orders{token_qs}"><span class="side-icon">◇</span>Ordenes</a><a href="/admin/withdrawals{token_qs}"><span class="side-icon">△</span>Retiros</a><a href="/admin/accounts{token_qs}"><span class="side-icon">○</span>Cuentas</a></nav>
     <button class="theme-toggle" type="button" onclick="toggleChautTheme()">Modo claro/oscuro</button>
     <div class="side-spacer"></div>
     <a class="logout" href="/logout">Salir</a>
@@ -508,6 +508,45 @@ def admin_order_detail(
     """
     return render_admin("Detalle Orden", body, token)
 
+
+
+def admin_withdrawals(store: OrderStore, token: str | None = None) -> HTMLResponse:
+    withdrawals = store.list_withdrawals(limit=100)
+    pending = [wd for wd in withdrawals if wd.status in {"requested", "selling_xaut", "xaut_sold", "paying_cop"}]
+    cards = []
+    for wd in pending or withdrawals[:20]:
+        confirm_form = ""
+        if wd.status in {"xaut_sold", "paying_cop"}:
+            confirm_form = (
+                f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/confirm-payment{_token_qs(token)}">'
+                '<input name="cop_paid" type="number" step="0.01" placeholder="COP pagado" required>'
+                '<input name="cop_tx_ref" placeholder="Referencia Bre-B" required>'
+                '<input name="admin_note" placeholder="Nota opcional">'
+                '<button class="button" type="submit">Confirmar pago COP</button></form>'
+            )
+        fail_form = (
+            f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/mark-failed{_token_qs(token)}">'
+            '<input name="reason" placeholder="Motivo del fallo" required>'
+            '<input name="admin_note" placeholder="Nota opcional">'
+            '<button class="button" type="submit">Marcar fallido</button></form>'
+        )
+        usdt = "" if wd.usdt_received is None else f"{wd.usdt_received:.8f}"
+        price = "" if wd.xaut_sell_price is None else f"{wd.xaut_sell_price:.2f}"
+        estimated = "" if wd.estimated_value_cop is None else f"{wd.estimated_value_cop:,.0f}"
+        cards.append(
+            f'<article class="card"><p class="eyebrow">{escape(wd.status)}</p>'
+            f'<h2><code>{escape(wd.withdrawal_id)}</code></h2><div class="grid">'
+            f'<div><span class="muted">Cliente</span><br><code>{escape(wd.customer_id)}</code></div>'
+            f'<div><span class="muted">Gramos</span><br>{wd.gold_grams:.12f}</div>'
+            f'<div><span class="muted">XAUT</span><br>{wd.xaut_amount:.18f}</div>'
+            f'<div><span class="muted">USDT recibido</span><br>{usdt}</div>'
+            f'<div><span class="muted">Precio venta</span><br>{price}</div>'
+            f'<div><span class="muted">Valor COP estimado</span><br>{estimated}</div>'
+            f'<div><span class="muted">Llave Bre-B</span><br><code>{escape(wd.breb_key)}</code></div>'
+            f'</div>{confirm_form}{fail_form}</article>'
+        )
+    body = "<div class='section-head'><h2>Retiros pendientes</h2></div>" + ("".join(cards) if cards else "<p class='muted'>No hay retiros.</p>")
+    return render_admin("Retiros", body, token)
 
 def admin_accounts(store: OrderStore, token: str | None = None) -> HTMLResponse:
     cards = []

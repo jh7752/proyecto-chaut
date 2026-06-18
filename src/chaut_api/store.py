@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
 
-from .models import AccountIdentityRequest, AccountIdentityResponse, AccountResponse, CreditProfileResponse, EventResponse, LedgerEntryResponse, OrderResponse, PortfolioResponse
+from .models import AccountIdentityRequest, AccountIdentityResponse, AccountResponse, CreditProfileResponse, EventResponse, LedgerEntryResponse, OrderResponse, PortfolioResponse, WithdrawalDetailResponse, WithdrawalResponse
 
 
 class OrderStore(Protocol):
@@ -34,6 +34,11 @@ class OrderStore(Protocol):
     def get_ledger_entry_for_order(self, external_id: str) -> LedgerEntryResponse | None: ...
     def get_portfolio(self, customer_id: str) -> PortfolioResponse: ...
     def get_credit_profile(self, customer_id: str, collateral_value_cop: float | None = None) -> CreditProfileResponse: ...
+    def add_withdrawal_ledger_entry(self, withdrawal_id: str, customer_id: str, gold_grams: float, xaut_amount: float, usdt_received: float | None = None, htx_order_id: str | None = None, payload: dict | None = None) -> LedgerEntryResponse: ...
+    def create_withdrawal(self, withdrawal: WithdrawalResponse) -> WithdrawalDetailResponse: ...
+    def get_withdrawal(self, withdrawal_id: str) -> WithdrawalDetailResponse | None: ...
+    def list_withdrawals(self, status_filter: str | None = None, limit: int = 100) -> list[WithdrawalDetailResponse]: ...
+    def update_withdrawal_status(self, withdrawal_id: str, status: str, **fields) -> WithdrawalDetailResponse | None: ...
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse: ...
     def list_events(self, entity_id: str) -> list[EventResponse]: ...
 
@@ -139,6 +144,35 @@ class SqliteOrderStore:
 
                 CREATE INDEX IF NOT EXISTS idx_ledger_entries_customer_created_at
                     ON ledger_entries(customer_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS withdrawals (
+                    withdrawal_id TEXT PRIMARY KEY,
+                    customer_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    provider_user_id TEXT NOT NULL,
+                    chat_id TEXT,
+                    breb_key TEXT NOT NULL,
+                    amount_mode TEXT NOT NULL DEFAULT 'all',
+                    gold_grams REAL NOT NULL,
+                    xaut_amount REAL NOT NULL,
+                    estimated_value_cop REAL,
+                    status TEXT NOT NULL DEFAULT 'requested',
+                    htx_order_id TEXT,
+                    usdt_received REAL,
+                    xaut_sell_price REAL,
+                    cop_paid REAL,
+                    cop_tx_ref TEXT,
+                    admin_note TEXT,
+                    failure_reason TEXT,
+                    ledger_entry_id TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    processed_at TEXT,
+                    completed_at TEXT,
+                    FOREIGN KEY (customer_id) REFERENCES accounts(customer_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_withdrawals_customer ON withdrawals(customer_id);
+                CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals(status);
                 """
             )
             self._ensure_order_columns(conn)
@@ -577,6 +611,113 @@ class SqliteOrderStore:
             identities_count=identities_count,
             reasons=reasons,
         )
+
+
+    def create_withdrawal(self, withdrawal: WithdrawalResponse) -> WithdrawalDetailResponse:
+        now = datetime.now(UTC).isoformat()
+        data = withdrawal.model_dump()
+        data["updated_at"] = now
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO withdrawals (
+                    withdrawal_id, customer_id, provider, provider_user_id, chat_id, breb_key,
+                    amount_mode, gold_grams, xaut_amount, estimated_value_cop, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    withdrawal.withdrawal_id, withdrawal.customer_id, withdrawal.provider,
+                    withdrawal.provider_user_id, withdrawal.chat_id, withdrawal.breb_key,
+                    withdrawal.amount_mode, withdrawal.gold_grams, withdrawal.xaut_amount,
+                    withdrawal.estimated_value_cop, withdrawal.status, withdrawal.created_at, now,
+                ),
+            )
+        created = self.get_withdrawal(withdrawal.withdrawal_id)
+        if created is None:
+            raise RuntimeError("Withdrawal creation failed")
+        return created
+
+    def get_withdrawal(self, withdrawal_id: str) -> WithdrawalDetailResponse | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM withdrawals WHERE withdrawal_id = ?", (withdrawal_id,)).fetchone()
+        return WithdrawalDetailResponse(**dict(row)) if row is not None else None
+
+    def list_withdrawals(self, status_filter: str | None = None, limit: int = 100) -> list[WithdrawalDetailResponse]:
+        with self._connect() as conn:
+            if status_filter:
+                rows = conn.execute(
+                    "SELECT * FROM withdrawals WHERE status = ? ORDER BY updated_at DESC LIMIT ?",
+                    (status_filter, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM withdrawals ORDER BY updated_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [WithdrawalDetailResponse(**dict(row)) for row in rows]
+
+    def update_withdrawal_status(self, withdrawal_id: str, status: str, **fields) -> WithdrawalDetailResponse | None:
+        allowed = {
+            "htx_order_id", "usdt_received", "xaut_sell_price", "cop_paid", "cop_tx_ref",
+            "admin_note", "failure_reason", "ledger_entry_id", "processed_at", "completed_at",
+        }
+        values = {key: value for key, value in fields.items() if key in allowed}
+        values["status"] = status
+        values["updated_at"] = datetime.now(UTC).isoformat()
+        assignments = ", ".join(f"{key} = ?" for key in values)
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE withdrawals SET {assignments} WHERE withdrawal_id = ?",
+                (*values.values(), withdrawal_id),
+            )
+        return self.get_withdrawal(withdrawal_id)
+
+    def add_withdrawal_ledger_entry(
+        self,
+        withdrawal_id: str,
+        customer_id: str,
+        gold_grams: float,
+        xaut_amount: float,
+        usdt_received: float | None = None,
+        htx_order_id: str | None = None,
+        payload: dict | None = None,
+    ) -> LedgerEntryResponse:
+        now = datetime.now(UTC).isoformat()
+        entry = LedgerEntryResponse(
+            entry_id=f"led-{uuid4().hex[:12]}",
+            customer_id=customer_id,
+            external_id=withdrawal_id,
+            entry_type="xaut_withdrawal",
+            asset="xaut",
+            amount=-abs(float(xaut_amount)),
+            gold_grams=-abs(float(gold_grams)),
+            usdt_spent=-(abs(float(usdt_received)) if usdt_received is not None else 0.0),
+            cop_gross=0.0,
+            exchange_order_id=htx_order_id,
+            payload=payload or {},
+            created_at=now,
+        )
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT * FROM ledger_entries WHERE external_id = ? AND entry_type = ?",
+                (entry.external_id, entry.entry_type),
+            ).fetchone()
+            if existing is not None:
+                return _ledger_entry_from_row(existing)
+            conn.execute(
+                """
+                INSERT INTO ledger_entries (
+                    entry_id, customer_id, external_id, entry_type, asset, amount, gold_grams,
+                    usdt_spent, cop_gross, exchange_order_id, payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry.entry_id, entry.customer_id, entry.external_id, entry.entry_type,
+                    entry.asset, entry.amount, entry.gold_grams, entry.usdt_spent,
+                    entry.cop_gross, entry.exchange_order_id, json.dumps(entry.payload), entry.created_at,
+                ),
+            )
+        return entry
 
     def add_event(self, entity_id: str, event_type: str, payload: dict) -> EventResponse:
         event = EventResponse(

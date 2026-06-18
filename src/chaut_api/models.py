@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, PositiveFloat, PositiveInt
+from pydantic import BaseModel, Field, PositiveFloat, PositiveInt, NonNegativeFloat
 
 MIN_ORDER_COP = 5000
 DEFAULT_PAYMENT_EXPIRATION_MINUTES = 45
@@ -239,6 +239,31 @@ class WithdrawalResponse(BaseModel):
     estimated_value_cop: float | None = None
     status: str
     created_at: str
+
+
+class WithdrawalDetailResponse(WithdrawalResponse):
+    htx_order_id: str | None = None
+    usdt_received: float | None = None
+    xaut_sell_price: float | None = None
+    cop_paid: float | None = None
+    cop_tx_ref: str | None = None
+    admin_note: str | None = None
+    failure_reason: str | None = None
+    ledger_entry_id: str | None = None
+    updated_at: str
+    processed_at: str | None = None
+    completed_at: str | None = None
+
+
+class WithdrawalPaymentConfirmationRequest(BaseModel):
+    cop_paid: NonNegativeFloat
+    cop_tx_ref: str = Field(min_length=1, max_length=120)
+    admin_note: str | None = None
+
+
+class WithdrawalMarkFailedRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+    admin_note: str | None = None
 
 
 class CreditProfileResponse(BaseModel):

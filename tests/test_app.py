@@ -1091,17 +1091,32 @@ def test_admin_login_protects_dashboard(tmp_path) -> None:
     assert "Chaut Admin" in allowed.text
 
 
-def test_create_withdrawal_request_records_customer_event(tmp_path) -> None:
-    from chaut_api.store import create_store
+def test_create_withdrawal_request_executes_htx_sell_and_creates_negative_ledger(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
 
-    database_url = f"sqlite:///{tmp_path / 'test.db'}"
-    client = TestClient(create_app(settings=Settings(
-        database_url=database_url,
-        admin_token=None,
-        admin_username=None,
-        admin_password=None,
-        admin_session_secret=None,
-    )))
+    class StubHtxPrivateClient:
+        calls = 0
+
+        def place_market_sell(self, symbol, amount):
+            StubHtxPrivateClient.calls += 1
+            assert symbol == "xautusdt"
+            assert float(amount) > 0
+            return {"status": "ok", "data": "sell-1"}
+
+        def order(self, order_id):
+            return {
+                "status": "ok",
+                "data": {
+                    "id": order_id,
+                    "state": "filled",
+                    "field-amount": "0.000281768398798842",
+                    "field-cash-amount": "1.33",
+                    "field-fees": "0",
+                },
+            }
+
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    client = make_client(tmp_path)
     account = client.post(
         "/accounts/identify",
         json={"provider": "telegram", "provider_user_id": "withdraw-1", "chat_id": "withdraw-1", "display_name": "Retiro Uno"},
@@ -1110,33 +1125,39 @@ def test_create_withdrawal_request_records_customer_event(tmp_path) -> None:
         "/orders",
         json={"client_id": "telegram:withdraw-1", "customer_id": account["customer_id"], "amount_cop_gross": 5000},
     ).json()
-    store = create_store(database_url)
+    store = app_module.create_store(build_settings(tmp_path).database_url)
     store.create_ledger_entry(
-        store.get_order(order["external_id"]),
-        {"xaut_net": 0.001, "gold_grams_net": 0.0311034768, "field_cash_amount": "4.5", "order_id": "htx-1"},
-        {"prepared": {"ask_price": 4500}},
+        app_module.OrderResponse(**{**order, "payment_amount": 1.4, "sell_price_cop_per_usdt": 3500}),
+        {"order_id": "buy-1", "xaut_net": "0.0003", "gold_grams_net": "0.009331043040", "field_cash_amount": "1.4"},
+        {"prepared": {"ask_price": "4700"}},
     )
 
     response = client.post(
-        "/withdrawals",
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
         json={
             "customer_id": account["customer_id"],
             "provider": "telegram",
             "provider_user_id": "withdraw-1",
             "chat_id": "withdraw-1",
-            "breb_key": "  3001234567  ",
-            "amount_mode": "all",
+            "breb_key": "@brebTest",
+            "portfolio_snapshot": {"xaut_net": 0.0003},
         },
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "requested"
-    assert body["breb_key"] == "3001234567"
-    assert body["gold_grams"] == 0.0311034768
-    events = store.list_events(account["customer_id"])
-    assert events[-1].event_type == "withdrawal.requested"
-    assert events[-1].payload["withdrawal_id"] == body["withdrawal_id"]
+    assert body["status"] == "xaut_sold"
+    assert body["htx_order_id"] == "sell-1"
+    assert body["usdt_received"] == 1.33
+    assert body["ledger_entry_id"].startswith("led-")
+    assert StubHtxPrivateClient.calls == 1
+    portfolio = client.get(f"/accounts/{account['customer_id']}/portfolio").json()
+    assert portfolio["entries_count"] == 2
+    withdrawal_entry = [entry for entry in portfolio["entries"] if entry["entry_type"] == "xaut_withdrawal"][0]
+    assert withdrawal_entry["amount"] < 0
+    assert withdrawal_entry["gold_grams"] < 0
+    events = client.get(f"/withdrawals/{body['withdrawal_id']}").json()
+    assert events["status"] == "xaut_sold"
 
 
 def test_create_withdrawal_request_rejects_mismatched_identity(tmp_path) -> None:
@@ -1147,7 +1168,7 @@ def test_create_withdrawal_request_rejects_mismatched_identity(tmp_path) -> None
     ).json()
 
     response = client.post(
-        "/withdrawals",
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
         json={
             "customer_id": account["customer_id"],
             "provider": "telegram",
@@ -1158,6 +1179,97 @@ def test_create_withdrawal_request_rejects_mismatched_identity(tmp_path) -> None
     )
 
     assert response.status_code == 409
+
+
+
+def _seed_withdrawable_account(client, tmp_path, user_id="withdraw-x"):
+    import chaut_api.app as app_module
+
+    account = client.post(
+        "/accounts/identify",
+        json={"provider": "telegram", "provider_user_id": user_id, "display_name": "Withdraw User"},
+    ).json()
+    order = client.post(
+        "/orders",
+        json={"client_id": f"telegram:{user_id}", "customer_id": account["customer_id"], "amount_cop_gross": 5000},
+    ).json()
+    store = app_module.create_store(build_settings(tmp_path).database_url)
+    store.create_ledger_entry(
+        app_module.OrderResponse(**{**order, "payment_amount": 1.4, "sell_price_cop_per_usdt": 3500}),
+        {"order_id": "buy-1", "xaut_net": "0.0003", "gold_grams_net": "0.009331043040", "field_cash_amount": "1.4"},
+        {"prepared": {"ask_price": "4700"}},
+    )
+    return account
+
+
+def test_confirm_payment_updates_withdrawal_to_completed(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class StubHtxPrivateClient:
+        def place_market_sell(self, symbol, amount):
+            return {"status": "ok", "data": "sell-2"}
+
+        def order(self, order_id):
+            return {"status": "ok", "data": {"id": order_id, "state": "filled", "field-amount": "0.0003", "field-cash-amount": "1.4", "field-fees": "0"}}
+
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    client = make_client(tmp_path)
+    account = _seed_withdrawable_account(client, tmp_path, "withdraw-confirm")
+    withdrawal = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={"customer_id": account["customer_id"], "provider": "telegram", "provider_user_id": "withdraw-confirm", "breb_key": "@breb", "portfolio_snapshot": {"xaut_net": 0.0003}},
+    ).json()
+
+    response = client.post(
+        f"/withdrawals/{withdrawal['withdrawal_id']}/confirm-payment",
+        json={"cop_paid": 5000, "cop_tx_ref": "breb-ref-1", "admin_note": "pagado"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["cop_paid"] == 5000
+    assert body["cop_tx_ref"] == "breb-ref-1"
+    assert body["completed_at"] is not None
+
+
+def test_withdrawal_rejects_more_than_available_snapshot(tmp_path) -> None:
+    client = make_client(tmp_path)
+    account = _seed_withdrawable_account(client, tmp_path, "withdraw-too-much")
+
+    response = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={"customer_id": account["customer_id"], "provider": "telegram", "provider_user_id": "withdraw-too-much", "breb_key": "@breb", "portfolio_snapshot": {"xaut_net": 2}},
+    )
+
+    assert response.status_code == 409
+    assert "Cannot withdraw more than available" in response.json()["detail"]
+
+
+def test_mark_withdrawal_failed(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class FailingHtxPrivateClient:
+        def place_market_sell(self, symbol, amount):
+            raise RuntimeError("exchange unavailable")
+
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: FailingHtxPrivateClient())
+    client = make_client(tmp_path)
+    account = _seed_withdrawable_account(client, tmp_path, "withdraw-failed")
+    withdrawal = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={"customer_id": account["customer_id"], "provider": "telegram", "provider_user_id": "withdraw-failed", "breb_key": "@breb", "portfolio_snapshot": {"xaut_net": 0.0003}},
+    ).json()
+    assert withdrawal["status"] == "failed"
+
+    response = client.post(
+        f"/withdrawals/{withdrawal['withdrawal_id']}/mark-failed",
+        json={"reason": "manual failure", "admin_note": "reviewed"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["failure_reason"] == "manual failure"
 
 
 def test_trm_prefers_seticap_close_over_stale_cache(monkeypatch, tmp_path) -> None:
