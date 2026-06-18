@@ -14,6 +14,7 @@ PENDING_NAMES: dict[int, bool] = {}
 PENDING_CUSTOM_AMOUNTS: set[int] = set()
 PENDING_SETTLEMENTS: set[str] = set()
 PENDING_WITHDRAWAL_KEYS: dict[int, dict[str, Any]] = {}
+NOTIFIED_WITHDRAWALS: set[str] = set()
 
 
 def main() -> None:
@@ -103,6 +104,8 @@ def handle_callback(callback: dict[str, Any]) -> None:
         send_balance(chat_id, user)
     elif data == "movimientos":
         send_movements(chat_id, user)
+    elif data.startswith("withdraw:status:"):
+        check_withdrawal_status(chat_id, data.rsplit(":", 1)[1])
     elif data == "withdraw:start":
         start_withdrawal(chat_id, user)
     elif data == "withdraw:all":
@@ -415,17 +418,46 @@ def confirm_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
             "amount_mode": "all",
             "portfolio_snapshot": request.get("portfolio", {}),
         }
-        withdrawal = api("POST", "/withdrawals", payload)
+        withdrawal = api("POST", "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL", payload)
     except Exception as exc:
         send_text(chat_id, f"No pude registrar el retiro. Intenta de nuevo en un momento.\n\nDetalle: {friendly_api_error(exc)}")
         return
     estimated_cop = withdrawal.get("estimated_value_cop")
-    lines = ["Solicitud recibida ✅"]
+    lines = ["Retiro recibido ✅"]
     if estimated_cop is not None:
         lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
-    lines.append("Te avisaremos cuando quede procesada.")
-    send_text(chat_id, "\n".join(lines), buttons=[[{"text": "📊 Ver saldo", "callback_data": "saldo"}]])
+    if withdrawal.get("status") == "xaut_sold":
+        lines.append("Ya vendimos tu oro digital. Ahora haremos el pago manual a tu llave Bre-B.")
+    elif withdrawal.get("status") == "failed":
+        lines.append("No pudimos procesar la venta en este momento. Te avisaremos cuando lo revisemos.")
+    else:
+        lines.append("Estamos procesando la venta de tu oro digital. Te avisaremos cuando enviemos el pago.")
+    send_text(chat_id, "\n".join(lines), buttons=[[{"text": "Ver estado", "callback_data": f"withdraw:status:{withdrawal['withdrawal_id']}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]])
 
+
+
+def check_withdrawal_status(chat_id: int, withdrawal_id: str) -> None:
+    withdrawal = api("GET", f"/withdrawals/{withdrawal_id}")
+    if withdrawal.get("status") == "completed":
+        notify_withdrawal_completed(chat_id, withdrawal)
+    elif withdrawal.get("status") == "failed":
+        send_text(chat_id, f"El retiro {withdrawal_id} quedó fallido. Lo revisaremos manualmente.")
+    elif withdrawal.get("status") == "xaut_sold":
+        send_text(chat_id, "Ya vendimos tu oro digital. Estamos preparando el pago manual por Bre-B.")
+    else:
+        send_text(chat_id, "Estamos procesando la venta de tu oro digital.")
+
+
+def notify_withdrawal_completed(chat_id: int, withdrawal: dict[str, Any]) -> None:
+    withdrawal_id = withdrawal.get("withdrawal_id")
+    if withdrawal_id in NOTIFIED_WITHDRAWALS:
+        return
+    NOTIFIED_WITHDRAWALS.add(withdrawal_id)
+    send_text(
+        chat_id,
+        f"Te enviamos {format_cop(withdrawal.get('cop_paid'))} COP a tu llave Bre-B {withdrawal.get('breb_key')}. Ref: {withdrawal.get('cop_tx_ref')}",
+        buttons=[[{"text": "📊 Ver saldo", "callback_data": "saldo"}]],
+    )
 
 def send_movements(chat_id: int, user: dict[str, Any]) -> None:
     if not account_exists(user.get("id", chat_id)):
