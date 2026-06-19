@@ -300,10 +300,11 @@ def format_cop(value: float | int | None) -> str:
     return f"{float(value):,.0f}"
 
 
-def portfolio_for_user(chat_id: int, user: dict[str, Any]) -> dict[str, Any] | None:
+def portfolio_for_user(chat_id: int, user: dict[str, Any], *, include_markup: bool = True) -> dict[str, Any] | None:
     if not account_exists(user.get("id", chat_id)):
         return None
-    return api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}/portfolio")
+    suffix = "" if include_markup else "?include_markup=false"
+    return api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}/portfolio{suffix}")
 
 
 def send_balance(chat_id: int, user: dict[str, Any]) -> None:
@@ -334,7 +335,7 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
 
 def start_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
     try:
-        portfolio = portfolio_for_user(chat_id, user)
+        portfolio = portfolio_for_user(chat_id, user, include_markup=False)
     except Exception:
         portfolio = None
     if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:
@@ -361,7 +362,7 @@ def start_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
 
 def ask_partial_withdrawal_amount(chat_id: int, user: dict[str, Any]) -> None:
     try:
-        portfolio = portfolio_for_user(chat_id, user)
+        portfolio = portfolio_for_user(chat_id, user, include_markup=False)
     except Exception:
         portfolio = None
     if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:
@@ -385,7 +386,7 @@ def handle_partial_withdrawal_amount(chat_id: int, user: dict[str, Any], text: s
         return
     PENDING_PARTIAL_WITHDRAWALS.discard(chat_id)
     try:
-        portfolio = portfolio_for_user(chat_id, user)
+        portfolio = portfolio_for_user(chat_id, user, include_markup=False)
     except Exception:
         portfolio = None
     if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:
@@ -421,7 +422,7 @@ def handle_partial_withdrawal_amount(chat_id: int, user: dict[str, Any], text: s
 
 def ask_withdrawal_key(chat_id: int, user: dict[str, Any]) -> None:
     try:
-        portfolio = portfolio_for_user(chat_id, user)
+        portfolio = portfolio_for_user(chat_id, user, include_markup=False)
     except Exception:
         portfolio = None
     if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:
@@ -442,7 +443,7 @@ def handle_withdrawal_key(chat_id: int, user: dict[str, Any], text: str) -> None
         send_text(chat_id, "Esa llave se ve muy corta. Escríbela de nuevo, porfa.")
         return
     try:
-        portfolio = portfolio_for_user(chat_id, user) or request.get("portfolio")
+        portfolio = portfolio_for_user(chat_id, user, include_markup=False) or request.get("portfolio")
     except Exception:
         portfolio = request.get("portfolio")
     if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:

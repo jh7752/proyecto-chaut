@@ -172,7 +172,11 @@ def _latest_portfolio_cop_per_usdt(portfolio: PortfolioResponse) -> float | None
 
 
 def _with_estimated_portfolio_value(
-    portfolio: PortfolioResponse, settings: Settings, coinsenda_client: CoinsendaClient
+    portfolio: PortfolioResponse,
+    settings: Settings,
+    coinsenda_client: CoinsendaClient,
+    *,
+    include_markup: bool = True,
 ) -> PortfolioResponse:
     if portfolio.xaut_net <= 0:
         return portfolio
@@ -186,7 +190,7 @@ def _with_estimated_portfolio_value(
         sell_price = float(coinsenda_rate() if callable(coinsenda_rate) else get_usdt_cop_sell_price())
         cop_per_usdt = apply_portfolio_valuation_markup(
             sell_price, settings.portfolio_valuation_markup_percent
-        )
+        ) if include_markup else sell_price
     except Exception:
         cop_per_usdt = _latest_portfolio_cop_per_usdt(portfolio)
     if xaut_price is None or cop_per_usdt is None:
@@ -406,11 +410,11 @@ def create_app(
 
 
     @app.get("/accounts/{customer_id}/portfolio", response_model=PortfolioResponse)
-    def get_account_portfolio(customer_id: str) -> PortfolioResponse:
+    def get_account_portfolio(customer_id: str, include_markup: bool = True) -> PortfolioResponse:
         account = store.get_account(customer_id)
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
-        return _with_estimated_portfolio_value(store.get_portfolio(customer_id), settings, coinsenda_client)
+        return _with_estimated_portfolio_value(store.get_portfolio(customer_id), settings, coinsenda_client, include_markup=include_markup)
 
     @app.get("/accounts/{customer_id}/credit-profile", response_model=CreditProfileResponse)
     def get_account_credit_profile(customer_id: str) -> CreditProfileResponse:
@@ -421,11 +425,11 @@ def create_app(
         return store.get_credit_profile(customer_id, portfolio.estimated_value_cop)
 
     @app.get("/accounts/by-identity/{provider}/{provider_user_id}/portfolio", response_model=PortfolioResponse)
-    def get_account_portfolio_by_identity(provider: str, provider_user_id: str) -> PortfolioResponse:
+    def get_account_portfolio_by_identity(provider: str, provider_user_id: str, include_markup: bool = True) -> PortfolioResponse:
         account = store.get_account_by_identity(provider, provider_user_id)
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
-        return _with_estimated_portfolio_value(store.get_portfolio(account.customer_id), settings, coinsenda_client)
+        return _with_estimated_portfolio_value(store.get_portfolio(account.customer_id), settings, coinsenda_client, include_markup=include_markup)
 
     @app.post("/withdrawals", response_model=WithdrawalDetailResponse)
     def create_withdrawal_request(payload: WithdrawalRequest, confirm: str = "") -> WithdrawalDetailResponse:
@@ -437,7 +441,7 @@ def create_app(
         linked_account = store.get_account_by_identity(payload.provider, payload.provider_user_id)
         if linked_account is None or linked_account.customer_id != payload.customer_id:
             raise HTTPException(status_code=409, detail="Identity does not match account")
-        portfolio = _with_estimated_portfolio_value(store.get_portfolio(payload.customer_id), settings, coinsenda_client)
+        portfolio = _with_estimated_portfolio_value(store.get_portfolio(payload.customer_id), settings, coinsenda_client, include_markup=False)
         if portfolio.gold_grams_net <= 0 or portfolio.xaut_net <= 0:
             raise HTTPException(status_code=409, detail="No gold available to withdraw")
         # Subtract pending withdrawals to prevent double-spending

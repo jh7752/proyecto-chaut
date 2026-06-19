@@ -897,6 +897,10 @@ def test_portfolio_value_uses_coinsenda_sell_price_plus_configured_markup(monkey
     assert portfolio["valuation_rate_cop_per_usdt"] == 3460.37
     assert portfolio["estimated_value_cop"] == 15571.66
 
+    liquidation_portfolio = client.get("/accounts/by-identity/telegram/value-1/portfolio?include_markup=false").json()
+    assert liquidation_portfolio["valuation_rate_cop_per_usdt"] == 3392.52
+    assert liquidation_portfolio["estimated_value_cop"] == 15266.34
+
 
 
 def test_admin_order_detail_shows_exchange_rates(monkeypatch, tmp_path) -> None:
