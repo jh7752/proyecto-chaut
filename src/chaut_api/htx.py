@@ -252,7 +252,7 @@ elif action == "place_market_buy":
     body = json.dumps({{"account-id": spot_account_id(), "symbol": params["symbol"], "type": "buy-market", "amount": params["funds"], "client-order-id": "chaut-htx-" + str(int(time.time() * 1000)), "source": "spot-api"}}, separators=(",", ":"))
     payload = call("POST", "/v1/order/orders/place", body)
 elif action == "place_market_sell":
-    body = json.dumps({"account-id": spot_account_id(), "symbol": params["symbol"], "type": "sell-market", "amount": params["amount"], "client-order-id": "chaut-wd-" + str(int(time.time() * 1000)), "source": "spot-api"}, separators=(",", ":"))
+    body = json.dumps({{"account-id": spot_account_id(), "symbol": params["symbol"], "type": "sell-market", "amount": params["amount"], "client-order-id": "chaut-wd-" + str(int(time.time() * 1000)), "source": "spot-api"}}, separators=(",", ":"))
     payload = call("POST", "/v1/order/orders/place", body)
 elif action == "order":
     payload = call("GET", "/v1/order/orders/" + str(params["order_id"]))
