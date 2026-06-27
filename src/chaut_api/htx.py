@@ -197,6 +197,19 @@ class SsmHtxPrivateClient:
 
 
 def _worker_script(payload: dict) -> str:
+    action = payload.get("action")
+    if action in {"accounts", "balance"}:
+        return _accounts_worker_script(payload)
+    if action == "place_market_buy":
+        return _buy_worker_script(payload)
+    if action == "place_market_sell":
+        return _sell_worker_script(payload)
+    if action == "order":
+        return _order_worker_script(payload)
+    raise RuntimeError(f"unknown HTX worker action {action}")
+
+
+def _worker_prelude(payload: dict) -> str:
     payload_json = json.dumps(payload)
     return f'''
 import base64
@@ -242,23 +255,43 @@ def spot_account_id():
         if account.get("type") == "spot" and account.get("state") == "working":
             return str(account["id"])
     raise RuntimeError("HTX spot account not found")
-action = request["action"]
 params = request.get("params", {{}})
+'''
+
+
+def _accounts_worker_script(payload: dict) -> str:
+    return _worker_prelude(payload) + '''
+action = request["action"]
 if action == "accounts":
     payload = call("GET", "/v1/account/accounts")
 elif action == "balance":
     payload = call("GET", "/v1/account/accounts/" + str(params["account_id"]) + "/balance")
-elif action == "place_market_buy":
-    body = json.dumps({{"account-id": spot_account_id(), "symbol": params["symbol"], "type": "buy-market", "amount": params["funds"], "client-order-id": "chaut-htx-" + str(int(time.time() * 1000)), "source": "spot-api"}}, separators=(",", ":"))
-    payload = call("POST", "/v1/order/orders/place", body)
-elif action == "place_market_sell":
-    body = json.dumps({{"account-id": spot_account_id(), "symbol": params["symbol"], "type": "sell-market", "amount": params["amount"], "client-order-id": "chaut-wd-" + str(int(time.time() * 1000)), "source": "spot-api"}}, separators=(",", ":"))
-    payload = call("POST", "/v1/order/orders/place", body)
-elif action == "order":
-    payload = call("GET", "/v1/order/orders/" + str(params["order_id"]))
 else:
-    raise RuntimeError("unknown action " + action)
-print(json.dumps({{"ok": True, "payload": payload}}))
+    raise RuntimeError("unknown accounts action " + action)
+print(json.dumps({"ok": True, "payload": payload}))
+'''
+
+
+def _buy_worker_script(payload: dict) -> str:
+    return _worker_prelude(payload) + '''
+body = json.dumps({"account-id": spot_account_id(), "symbol": params["symbol"], "type": "buy-market", "amount": params["funds"], "client-order-id": "chaut-htx-" + str(int(time.time() * 1000)), "source": "spot-api"}, separators=(",", ":"))
+payload = call("POST", "/v1/order/orders/place", body)
+print(json.dumps({"ok": True, "payload": payload}))
+'''
+
+
+def _sell_worker_script(payload: dict) -> str:
+    return _worker_prelude(payload) + '''
+body = json.dumps({"account-id": spot_account_id(), "symbol": params["symbol"], "type": "sell-market", "amount": params["amount"], "client-order-id": "chaut-wd-" + str(int(time.time() * 1000)), "source": "spot-api"}, separators=(",", ":"))
+payload = call("POST", "/v1/order/orders/place", body)
+print(json.dumps({"ok": True, "payload": payload}))
+'''
+
+
+def _order_worker_script(payload: dict) -> str:
+    return _worker_prelude(payload) + '''
+payload = call("GET", "/v1/order/orders/" + str(params["order_id"]))
+print(json.dumps({"ok": True, "payload": payload}))
 '''
 
 
