@@ -90,6 +90,7 @@ class HtxPrivateClient:
 
     def place_market_sell(self, symbol: str, amount: str) -> dict:
         account_id = self.spot_account_id()
+        amount = str(_quantize_down(Decimal(str(amount)), 6))
         body = json.dumps(
             {
                 "account-id": account_id,
@@ -157,6 +158,7 @@ class SsmHtxPrivateClient:
         return self._run_worker("place_market_buy", {"symbol": symbol, "funds": funds})
 
     def place_market_sell(self, symbol: str, amount: str) -> dict:
+        amount = str(_quantize_down(Decimal(str(amount)), 6))
         return self._run_worker("place_market_sell", {"symbol": symbol, "amount": amount})
 
     def order(self, order_id: str) -> dict:

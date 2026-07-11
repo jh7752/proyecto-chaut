@@ -3,6 +3,29 @@ import pytest
 from chaut_api import htx, kucoin
 
 
+def test_ssm_htx_sell_client_truncates_amount_to_exchange_precision(monkeypatch) -> None:
+    captured = {}
+
+    class FakeSsm:
+        def send_command(self, **kwargs):
+            captured["script"] = kwargs["Parameters"]["commands"][0]
+            return {"Command": {"CommandId": "cmd-1"}}
+
+        def get_command_invocation(self, **kwargs):
+            return {
+                "Status": "Success",
+                "StandardOutputContent": '{"ok": true, "payload": {"status": "ok", "data": "sell-1"}}',
+            }
+
+    monkeypatch.setattr(htx.boto3, "client", lambda *args, **kwargs: FakeSsm())
+
+    client = htx.SsmHtxPrivateClient("i-worker")
+    client.place_market_sell("xautusdt", "0.001313766022980094")
+
+    assert "0.001313" in captured["script"]
+    assert "0.001313766022980094" not in captured["script"]
+
+
 @pytest.mark.parametrize(
     ("action", "params"),
     [
