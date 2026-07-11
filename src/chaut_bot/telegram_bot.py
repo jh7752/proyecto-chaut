@@ -511,10 +511,19 @@ def confirm_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
     lines = ["Retiro recibido ✅"]
     if estimated_cop is not None:
         lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
-    if withdrawal.get("status") == "xaut_sold":
-        lines.append("Ya vendimos tu oro digital. Ahora haremos el pago a tu llave Bre-B.")
-    elif withdrawal.get("status") == "failed":
-        lines.append("No pudimos procesar la venta en este momento. Te avisaremos cuando lo revisemos.")
+    status = withdrawal.get("status")
+    if status == "completed":
+        lines.append(f"Te enviamos {format_cop(withdrawal.get('cop_paid'))} COP a tu llave Bre-B.")
+    elif status == "xaut_sold":
+        lines.append("Ya vendimos tu oro digital. Estamos transfiriendo los USDT para liquidar COP.")
+    elif status == "transferring_usdt":
+        lines.append("Ya vendimos tu oro digital. Estamos moviendo los USDT para liquidar COP.")
+    elif status == "swapping_cop":
+        lines.append("Ya vendimos tu oro digital. Estamos convirtiendo USDT a COP con Coinsenda.")
+    elif status == "paying_cop":
+        lines.append("Ya convertimos a COP. Estamos enviando el pago a tu llave Bre-B.")
+    elif status in {"swap_failed", "payout_failed", "failed"}:
+        lines.append("No pudimos completar el retiro en este momento. Lo revisaremos manualmente.")
     else:
         lines.append("Estamos procesando la venta de tu oro digital. Te avisaremos cuando enviemos el pago.")
     send_text(chat_id, "\n".join(lines), buttons=[[{"text": "Ver estado", "callback_data": f"withdraw:status:{withdrawal['withdrawal_id']}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]])
@@ -525,10 +534,16 @@ def check_withdrawal_status(chat_id: int, withdrawal_id: str) -> None:
     withdrawal = api("GET", f"/withdrawals/{withdrawal_id}")
     if withdrawal.get("status") == "completed":
         notify_withdrawal_completed(chat_id, withdrawal)
-    elif withdrawal.get("status") == "failed":
-        send_text(chat_id, f"El retiro {withdrawal_id} quedó fallido. Lo revisaremos manualmente.")
+    elif withdrawal.get("status") in {"failed", "swap_failed", "payout_failed"}:
+        send_text(chat_id, f"El retiro {withdrawal_id} quedó en revisión. Lo revisaremos manualmente.")
     elif withdrawal.get("status") == "xaut_sold":
-        send_text(chat_id, "Ya vendimos tu oro digital. Estamos preparando el pago manual por Bre-B.")
+        send_text(chat_id, "Ya vendimos tu oro digital. Estamos moviendo los USDT para liquidar COP.")
+    elif withdrawal.get("status") == "transferring_usdt":
+        send_text(chat_id, "Estamos transfiriendo los USDT dentro de Coinsenda.")
+    elif withdrawal.get("status") == "swapping_cop":
+        send_text(chat_id, "Estamos convirtiendo USDT a COP con la tasa actual de Coinsenda.")
+    elif withdrawal.get("status") == "paying_cop":
+        send_text(chat_id, "Estamos enviando el pago COP a tu llave Bre-B.")
     else:
         send_text(chat_id, "Estamos procesando la venta de tu oro digital.")
 

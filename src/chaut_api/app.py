@@ -41,6 +41,7 @@ from .coinsenda import (
     create_coinsenda_client,
     get_usdt_cop_sell_price,
 )
+from .coinsenda_payout import CoinsendaPayoutClient, create_coinsenda_payout_client
 from .models import (
     AccountIdentityRequest,
     AccountResponse,
@@ -209,6 +210,7 @@ def create_app(
     settings: Settings | None = None,
     store: OrderStore | None = None,
     coinsenda_client: CoinsendaClient | None = None,
+    coinsenda_payout_client: CoinsendaPayoutClient | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     store = store or create_store(settings.database_url)
@@ -216,6 +218,13 @@ def create_app(
         settings.coinsenda_mode,
         settings.coinsenda_app_origin,
         settings.coinsenda_runtime_dir,
+    )
+    coinsenda_payout_client = coinsenda_payout_client or create_coinsenda_payout_client(
+        settings.coinsenda_mode,
+        settings.coinsenda_runtime_dir,
+        settings.coinsenda_usdt_payment_account_id,
+        settings.coinsenda_usdt_trade_account_id,
+        settings.coinsenda_cop_trade_account_id,
     )
     app = FastAPI(title="Proyecto Chaut API", version="0.1.0")
 
@@ -446,7 +455,7 @@ def create_app(
             raise HTTPException(status_code=409, detail="No gold available to withdraw")
         # Subtract pending withdrawals to prevent double-spending
         pending = [w for w in store.list_withdrawals(limit=500)
-                   if w.customer_id == payload.customer_id and w.status in {"requested", "selling_xaut", "xaut_sold", "paying_cop"}]
+                   if w.customer_id == payload.customer_id and w.status in {"requested", "selling_xaut", "xaut_sold", "transferring_usdt", "swapping_cop", "paying_cop", "swap_failed", "payout_failed"}]
         pending_xaut = sum(w.xaut_amount for w in pending)
         available_xaut = portfolio.xaut_net - pending_xaut
         if available_xaut <= 0:
@@ -519,19 +528,72 @@ def create_app(
             if updated is None:
                 raise HTTPException(status_code=404, detail="Withdrawal not found")
             store.add_event(updated.withdrawal_id, "withdrawal.xaut_sold", {**updated.model_dump(), "ledger_entry": entry.model_dump(), "order": fill})
-            return updated
+
+            transferring = store.update_withdrawal_status(updated.withdrawal_id, "transferring_usdt")
+            if transferring is None:
+                raise HTTPException(status_code=404, detail="Withdrawal not found")
+            store.add_event(transferring.withdrawal_id, "withdrawal.transferring_usdt", transferring.model_dump())
+            transfer = coinsenda_payout_client.self_transfer_usdt(usdt_received)
+            transfer_id = str(transfer.get("id") or transfer.get("withdraw_id") or transfer.get("transfer_id") or "") or None
+            transferred = store.update_withdrawal_status(
+                transferring.withdrawal_id,
+                "transferring_usdt",
+                coinsenda_self_transfer_id=transfer_id,
+            )
+            if transferred is None:
+                raise HTTPException(status_code=404, detail="Withdrawal not found")
+            store.add_event(transferred.withdrawal_id, "withdrawal.usdt_transferred", {**transferred.model_dump(), "coinsenda": transfer})
+
+            swapping = store.update_withdrawal_status(transferred.withdrawal_id, "swapping_cop")
+            if swapping is None:
+                raise HTTPException(status_code=404, detail="Withdrawal not found")
+            store.add_event(swapping.withdrawal_id, "withdrawal.swapping_cop", swapping.model_dump())
+            sell_price_cop = float(coinsenda_payout_client.get_usdt_cop_sell_price())
+            swap = coinsenda_payout_client.swap_usdt_to_cop(usdt_received)
+            swap_id = str(swap.get("id") or swap.get("swap_id") or "") or None
+            cop_received = float(swap.get("cop_received") or swap.get("amount_received") or swap.get("to_amount") or (usdt_received * sell_price_cop))
+            coinsenda_sell_price = float(swap.get("sell_price") or swap.get("price") or sell_price_cop)
+            swapped = store.update_withdrawal_status(
+                swapping.withdrawal_id,
+                "paying_cop",
+                coinsenda_swap_id=swap_id,
+                cop_received=cop_received,
+                coinsenda_sell_price=coinsenda_sell_price,
+            )
+            if swapped is None:
+                raise HTTPException(status_code=404, detail="Withdrawal not found")
+            store.add_event(swapped.withdrawal_id, "withdrawal.cop_swapped", {**swapped.model_dump(), "coinsenda": swap})
+
+            store.add_event(swapped.withdrawal_id, "withdrawal.paying_cop", swapped.model_dump())
+            payout = coinsenda_payout_client.send_cop_via_breb(swapped.breb_key, cop_received)
+            withdraw_id = str(payout.get("id") or payout.get("withdraw_id") or "") or None
+            completed = store.update_withdrawal_status(
+                swapped.withdrawal_id,
+                "completed",
+                coinsenda_withdraw_id=withdraw_id,
+                cop_paid=cop_received,
+                cop_tx_ref=withdraw_id,
+                completed_at=datetime.now(UTC).isoformat(),
+            )
+            if completed is None:
+                raise HTTPException(status_code=404, detail="Withdrawal not found")
+            store.add_event(completed.withdrawal_id, "withdrawal.completed", {**completed.model_dump(), "coinsenda": payout})
+            return completed
         except HTTPException:
             raise
         except Exception as exc:
+            current_withdrawal = store.get_withdrawal(withdrawal.withdrawal_id)
+            current_status = current_withdrawal.status if current_withdrawal else withdrawal.status
+            failure_status = "swap_failed" if current_status == "swapping_cop" else "payout_failed" if current_status == "paying_cop" else "failed"
             failed = store.update_withdrawal_status(
                 withdrawal.withdrawal_id,
-                "failed",
+                failure_status,
                 failure_reason=str(exc),
                 processed_at=datetime.now(UTC).isoformat(),
             )
             if failed is None:
                 raise HTTPException(status_code=404, detail="Withdrawal not found") from exc
-            store.add_event(failed.withdrawal_id, "withdrawal.failed", failed.model_dump())
+            store.add_event(failed.withdrawal_id, f"withdrawal.{failed.status}", failed.model_dump())
             return failed
 
     @app.get("/withdrawals", response_model=list[WithdrawalDetailResponse])
@@ -550,8 +612,10 @@ def create_app(
         withdrawal = store.get_withdrawal(withdrawal_id)
         if withdrawal is None:
             raise HTTPException(status_code=404, detail="Withdrawal not found")
-        if withdrawal.status not in {"xaut_sold", "paying_cop"}:
+        if withdrawal.status not in {"xaut_sold", "paying_cop", "payout_failed", "completed"}:
             raise HTTPException(status_code=409, detail=f"Withdrawal cannot be completed from status={withdrawal.status}")
+        if withdrawal.status == "completed":
+            return withdrawal
         paying = store.update_withdrawal_status(withdrawal_id, "paying_cop")
         store.add_event(withdrawal_id, "withdrawal.paying_cop", paying.model_dump() if paying else {})
         completed = store.update_withdrawal_status(

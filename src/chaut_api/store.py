@@ -160,6 +160,11 @@ class SqliteOrderStore:
                     htx_order_id TEXT,
                     usdt_received REAL,
                     xaut_sell_price REAL,
+                    coinsenda_self_transfer_id TEXT,
+                    coinsenda_swap_id TEXT,
+                    cop_received REAL,
+                    coinsenda_sell_price REAL,
+                    coinsenda_withdraw_id TEXT,
                     cop_paid REAL,
                     cop_tx_ref TEXT,
                     admin_note TEXT,
@@ -176,6 +181,7 @@ class SqliteOrderStore:
                 """
             )
             self._ensure_order_columns(conn)
+            self._ensure_withdrawal_columns(conn)
 
     def _ensure_order_columns(self, conn: sqlite3.Connection) -> None:
         existing = {row["name"] for row in conn.execute("PRAGMA table_info(orders)").fetchall()}
@@ -199,6 +205,19 @@ class SqliteOrderStore:
             if column not in existing:
                 conn.execute(statement)
         conn.execute("UPDATE orders SET updated_at = created_at WHERE updated_at IS NULL")
+
+    def _ensure_withdrawal_columns(self, conn: sqlite3.Connection) -> None:
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(withdrawals)").fetchall()}
+        migrations = {
+            "coinsenda_self_transfer_id": "ALTER TABLE withdrawals ADD COLUMN coinsenda_self_transfer_id TEXT",
+            "coinsenda_swap_id": "ALTER TABLE withdrawals ADD COLUMN coinsenda_swap_id TEXT",
+            "cop_received": "ALTER TABLE withdrawals ADD COLUMN cop_received REAL",
+            "coinsenda_sell_price": "ALTER TABLE withdrawals ADD COLUMN coinsenda_sell_price REAL",
+            "coinsenda_withdraw_id": "ALTER TABLE withdrawals ADD COLUMN coinsenda_withdraw_id TEXT",
+        }
+        for column, statement in migrations.items():
+            if column not in existing:
+                conn.execute(statement)
 
     def upsert_account_identity(self, identity: AccountIdentityRequest) -> AccountResponse:
         now = datetime.now(UTC).isoformat()
@@ -658,8 +677,10 @@ class SqliteOrderStore:
 
     def update_withdrawal_status(self, withdrawal_id: str, status: str, **fields) -> WithdrawalDetailResponse | None:
         allowed = {
-            "htx_order_id", "usdt_received", "xaut_sell_price", "cop_paid", "cop_tx_ref",
-            "admin_note", "failure_reason", "ledger_entry_id", "processed_at", "completed_at",
+            "htx_order_id", "usdt_received", "xaut_sell_price", "coinsenda_self_transfer_id",
+            "coinsenda_swap_id", "cop_received", "coinsenda_sell_price", "coinsenda_withdraw_id",
+            "cop_paid", "cop_tx_ref", "admin_note", "failure_reason", "ledger_entry_id",
+            "processed_at", "completed_at",
         }
         values = {key: value for key, value in fields.items() if key in allowed}
         values["status"] = status

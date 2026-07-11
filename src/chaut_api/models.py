@@ -245,6 +245,11 @@ class WithdrawalDetailResponse(WithdrawalResponse):
     htx_order_id: str | None = None
     usdt_received: float | None = None
     xaut_sell_price: float | None = None
+    coinsenda_self_transfer_id: str | None = None
+    coinsenda_swap_id: str | None = None
+    cop_received: float | None = None
+    coinsenda_sell_price: float | None = None
+    coinsenda_withdraw_id: str | None = None
     cop_paid: float | None = None
     cop_tx_ref: str | None = None
     admin_note: str | None = None

@@ -203,6 +203,10 @@ def make_client_with_coinsenda(tmp_path, coinsenda_client):
     return TestClient(create_app(settings=build_settings(tmp_path), coinsenda_client=coinsenda_client))
 
 
+def make_client_with_payout(tmp_path, coinsenda_payout_client):
+    return TestClient(create_app(settings=build_settings(tmp_path), coinsenda_payout_client=coinsenda_payout_client))
+
+
 def test_reconcile_payment_confirms_accepted_matching_payment_request(tmp_path) -> None:
     client = make_client_with_coinsenda(tmp_path, AcceptedCoinsendaClient())
     order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()
@@ -1095,7 +1099,7 @@ def test_admin_login_protects_dashboard(tmp_path) -> None:
     assert "Chaut Admin" in allowed.text
 
 
-def test_create_withdrawal_request_executes_htx_sell_and_creates_negative_ledger(monkeypatch, tmp_path) -> None:
+def test_create_withdrawal_request_executes_full_payout_flow(monkeypatch, tmp_path) -> None:
     import chaut_api.app as app_module
 
     class StubHtxPrivateClient:
@@ -1119,8 +1123,32 @@ def test_create_withdrawal_request_executes_htx_sell_and_creates_negative_ledger
                 },
             }
 
+    class StubPayoutClient:
+        def __init__(self):
+            self.calls = []
+
+        def get_usdt_cop_sell_price(self):
+            self.calls.append(("price", None))
+            return 3100.0
+
+        def self_transfer_usdt(self, amount):
+            self.calls.append(("self_transfer", amount))
+            return {"id": "self-1", "status": "accepted"}
+
+        def swap_usdt_to_cop(self, amount):
+            self.calls.append(("swap", amount))
+            return {"id": "swap-1", "cop_received": 4123.0, "sell_price": 3100.0, "status": "accepted"}
+
+        def send_cop_via_breb(self, breb_key, amount):
+            self.calls.append(("breb", breb_key, amount))
+            return {"id": "breb-1", "status": "accepted"}
+
+        def check_withdraw_status(self, withdraw_id):
+            return {"id": withdraw_id, "status": "accepted"}
+
+    payout_client = StubPayoutClient()
     monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
-    client = make_client(tmp_path)
+    client = make_client_with_payout(tmp_path, payout_client)
     account = client.post(
         "/accounts/identify",
         json={"provider": "telegram", "provider_user_id": "withdraw-1", "chat_id": "withdraw-1", "display_name": "Retiro Uno"},
@@ -1150,10 +1178,17 @@ def test_create_withdrawal_request_executes_htx_sell_and_creates_negative_ledger
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "xaut_sold"
+    assert body["status"] == "completed"
     assert body["htx_order_id"] == "sell-1"
     assert body["usdt_received"] == 1.33
+    assert body["coinsenda_self_transfer_id"] == "self-1"
+    assert body["coinsenda_swap_id"] == "swap-1"
+    assert body["cop_received"] == 4123.0
+    assert body["coinsenda_sell_price"] == 3100.0
+    assert body["coinsenda_withdraw_id"] == "breb-1"
+    assert body["cop_paid"] == 4123.0
     assert body["ledger_entry_id"].startswith("led-")
+    assert payout_client.calls == [("self_transfer", 1.33), ("price", None), ("swap", 1.33), ("breb", "@brebTest", 4123.0)]
     assert StubHtxPrivateClient.calls == 1
     portfolio = client.get(f"/accounts/{account['customer_id']}/portfolio").json()
     assert portfolio["entries_count"] == 2
@@ -1161,7 +1196,7 @@ def test_create_withdrawal_request_executes_htx_sell_and_creates_negative_ledger
     assert withdrawal_entry["amount"] < 0
     assert withdrawal_entry["gold_grams"] < 0
     events = client.get(f"/withdrawals/{body['withdrawal_id']}").json()
-    assert events["status"] == "xaut_sold"
+    assert events["status"] == "completed"
 
 
 def test_create_withdrawal_request_rejects_mismatched_identity(tmp_path) -> None:
@@ -1232,8 +1267,8 @@ def test_confirm_payment_updates_withdrawal_to_completed(monkeypatch, tmp_path) 
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "completed"
-    assert body["cop_paid"] == 5000
-    assert body["cop_tx_ref"] == "breb-ref-1"
+    assert body["cop_paid"] == 4900.0
+    assert body["coinsenda_withdraw_id"] == "mock-breb-withdraw"
     assert body["completed_at"] is not None
 
 
@@ -1337,15 +1372,15 @@ def test_withdrawal_blocks_double_spend_when_first_is_pending(monkeypatch, tmp_p
     client = make_client(tmp_path)
     account = _seed_withdrawable_account(client, tmp_path, "double-spend")
 
-    # First withdrawal succeeds (status xaut_sold, awaiting manual COP payment)
+    # First withdrawal succeeds and debits the ledger
     first = client.post(
         "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
         json={"customer_id": account["customer_id"], "provider": "telegram", "provider_user_id": "double-spend", "breb_key": "@breb1", "portfolio_snapshot": {"xaut_net": 0.0003}},
     )
     assert first.status_code == 200
-    assert first.json()["status"] == "xaut_sold"
+    assert first.json()["status"] == "completed"
 
-    # Second withdrawal should be blocked: available balance is 0 after pending
+    # Second withdrawal should be blocked: available balance is 0 after ledger debit
     second = client.post(
         "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
         json={"customer_id": account["customer_id"], "provider": "telegram", "provider_user_id": "double-spend", "breb_key": "@breb2", "portfolio_snapshot": {"xaut_net": 0.0003}},
@@ -1388,7 +1423,7 @@ def test_partial_withdrawal_extracts_only_requested_xaut(monkeypatch, tmp_path) 
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "xaut_sold"
+    assert body["status"] == "completed"
     assert body["amount_mode"] == "partial"
     assert body["xaut_amount"] == pytest.approx(0.00015)
     assert len(sold_amounts) == 1

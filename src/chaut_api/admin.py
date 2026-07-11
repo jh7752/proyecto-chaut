@@ -512,11 +512,11 @@ def admin_order_detail(
 
 def admin_withdrawals(store: OrderStore, token: str | None = None) -> HTMLResponse:
     withdrawals = store.list_withdrawals(limit=100)
-    pending = [wd for wd in withdrawals if wd.status in {"requested", "selling_xaut", "xaut_sold", "paying_cop"}]
+    pending = [wd for wd in withdrawals if wd.status in {"requested", "selling_xaut", "xaut_sold", "transferring_usdt", "swapping_cop", "paying_cop", "swap_failed", "payout_failed"}]
     cards = []
     for wd in pending or withdrawals[:20]:
         confirm_form = ""
-        if wd.status in {"xaut_sold", "paying_cop"}:
+        if wd.status in {"xaut_sold", "paying_cop", "payout_failed"}:
             confirm_form = (
                 f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/confirm-payment{_token_qs(token)}">'
                 '<input name="cop_paid" type="number" step="0.01" placeholder="COP pagado" required>'
@@ -533,6 +533,8 @@ def admin_withdrawals(store: OrderStore, token: str | None = None) -> HTMLRespon
         usdt = "" if wd.usdt_received is None else f"{wd.usdt_received:.8f}"
         price = "" if wd.xaut_sell_price is None else f"{wd.xaut_sell_price:.2f}"
         estimated = "" if wd.estimated_value_cop is None else f"{wd.estimated_value_cop:,.0f}"
+        cop_received = "" if wd.cop_received is None else f"{wd.cop_received:,.2f}"
+        coinsenda_price = "" if wd.coinsenda_sell_price is None else f"{wd.coinsenda_sell_price:,.2f}"
         cards.append(
             f'<article class="card"><p class="eyebrow">{escape(wd.status)}</p>'
             f'<h2><code>{escape(wd.withdrawal_id)}</code></h2><div class="grid">'
@@ -542,6 +544,9 @@ def admin_withdrawals(store: OrderStore, token: str | None = None) -> HTMLRespon
             f'<div><span class="muted">USDT recibido</span><br>{usdt}</div>'
             f'<div><span class="muted">Precio venta</span><br>{price}</div>'
             f'<div><span class="muted">Valor COP estimado</span><br>{estimated}</div>'
+            f'<div><span class="muted">COP swap</span><br>{cop_received}</div>'
+            f'<div><span class="muted">Tasa Coinsenda</span><br>{coinsenda_price}</div>'
+            f'<div><span class="muted">Bre-B Coinsenda</span><br><code>{escape(str(wd.coinsenda_withdraw_id or ""))}</code></div>'
             f'<div><span class="muted">Llave Bre-B</span><br><code>{escape(wd.breb_key)}</code></div>'
             f'</div>{confirm_form}{fail_form}</article>'
         )
