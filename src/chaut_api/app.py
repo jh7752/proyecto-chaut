@@ -206,6 +206,16 @@ def _with_estimated_portfolio_value(
     )
 
 
+
+def estimate_withdrawal_value_cop(portfolio: PortfolioResponse, snapshot: dict, withdraw_xaut: float) -> float | None:
+    snapshot_value = snapshot.get("estimated_value_cop") if snapshot else None
+    snapshot_xaut = snapshot.get("xaut_net") if snapshot else None
+    if snapshot_value is not None and snapshot_xaut:
+        return float(snapshot_value) * float(withdraw_xaut) / float(snapshot_xaut)
+    if portfolio.estimated_value_cop and portfolio.xaut_net:
+        return float(portfolio.estimated_value_cop) * float(withdraw_xaut) / float(portfolio.xaut_net)
+    return portfolio.estimated_value_cop
+
 def create_app(
     settings: Settings | None = None,
     store: OrderStore | None = None,
@@ -483,7 +493,7 @@ def create_app(
             amount_mode=payload.amount_mode,
             gold_grams=withdraw_grams,
             xaut_amount=withdraw_xaut,
-            estimated_value_cop=(portfolio.estimated_value_cop * withdraw_xaut / portfolio.xaut_net) if portfolio.estimated_value_cop and portfolio.xaut_net and payload.amount_mode == "partial" else portfolio.estimated_value_cop,
+            estimated_value_cop=estimate_withdrawal_value_cop(portfolio, payload.portfolio_snapshot, withdraw_xaut),
             status="requested",
             created_at=datetime.now(UTC).isoformat(),
         ))

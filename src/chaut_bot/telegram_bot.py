@@ -319,11 +319,9 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
         return
     lines = ["Tu oro digital 🥇"]
     lines.append(f"{portfolio['gold_grams_net']:.12f} g")
-    if portfolio.get("estimated_value_cop") is not None:
-        lines.append(f"Valor hoy: {portfolio['estimated_value_cop']:,.0f} COP")
     lines.extend(
         [
-            f"Invertido: {portfolio['cop_invested']:,.0f} COP",
+            f"Ingresado: {portfolio['cop_invested']:,.0f} COP",
             f"Movimientos: {portfolio['entries_count']}",
         ]
     )
@@ -348,7 +346,7 @@ def start_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
         f"Disponible: {portfolio['gold_grams_net']:.12f} g",
     ]
     if estimated_cop is not None:
-        lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
+        lines.append(f"Cotización aprox: {format_cop(estimated_cop)} COP")
     lines.append("\n¿Cuánto quieres retirar?")
     send_text(
         chat_id,
@@ -442,10 +440,12 @@ def handle_withdrawal_key(chat_id: int, user: dict[str, Any], text: str) -> None
     if len(breb_key) < 3:
         send_text(chat_id, "Esa llave se ve muy corta. Escríbela de nuevo, porfa.")
         return
-    try:
-        portfolio = portfolio_for_user(chat_id, user, include_markup=False) or request.get("portfolio")
-    except Exception:
-        portfolio = request.get("portfolio")
+    portfolio = request.get("portfolio")
+    if not portfolio:
+        try:
+            portfolio = portfolio_for_user(chat_id, user, include_markup=False)
+        except Exception:
+            portfolio = None
     if not portfolio or portfolio.get("gold_grams_net", 0) <= 0:
         PENDING_WITHDRAWAL_KEYS.pop(chat_id, None)
         send_text(chat_id, "Aún no tienes oro digital disponible para retirar.")
@@ -468,7 +468,7 @@ def handle_withdrawal_key(chat_id: int, user: dict[str, Any], text: str) -> None
     else:
         estimated_cop = portfolio.get("estimated_value_cop")
         if estimated_cop is not None:
-            lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
+            lines.append(f"Cotización aprox: {format_cop(estimated_cop)} COP")
     lines.extend([f"Llave Bre-B: {breb_key}", "", "¿Confirmas?"])
     send_text(
         chat_id,
@@ -510,7 +510,7 @@ def confirm_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
     estimated_cop = withdrawal.get("estimated_value_cop")
     lines = ["Retiro recibido ✅"]
     if estimated_cop is not None:
-        lines.append(f"Recibes aprox: {format_cop(estimated_cop)} COP")
+        lines.append(f"Cotización aprox: {format_cop(estimated_cop)} COP")
     status = withdrawal.get("status")
     if status == "completed":
         lines.append(f"Te enviamos {format_cop(withdrawal.get('cop_paid'))} COP a tu llave Bre-B.")
