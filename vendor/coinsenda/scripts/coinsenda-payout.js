@@ -62,6 +62,20 @@ function pickNumber(payload, keys) {
   return null;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollById(fetcher, id, acceptedStates = ['accepted'], attempts = 8, delayMs = 1500) {
+  let current = null;
+  for (let index = 0; index < attempts; index += 1) {
+    current = await fetcher(id);
+    if (current && acceptedStates.includes(current.state || current.status)) return current;
+    await sleep(delayMs);
+  }
+  return current;
+}
+
 async function main() {
   const { action, args } = parseArgs(process.argv.slice(2));
   if (!action) throw new Error('Uso: node coinsenda-payout.js <pair|self-transfer|swap|breb-withdraw|withdraw-status> [args]');
@@ -77,10 +91,9 @@ async function main() {
 
   let body;
   if (action === 'pair') {
-    body = unwrap(await client.swap.pair.getPairForPublic({
-      primary_currency: 'usdt',
-      secondary_currency: 'cop'
-    }), 'getPairForPublic');
+    const pairs = unwrap(await client.swap.pair.getAllPairsForPublic({}), 'getAllPairsForPublic');
+    body = pairs.find((pair) => pair.primary_currency === 'usdt' && pair.secondary_currency === 'cop');
+    if (!body) throw new Error('USDT/COP pair not found');
     console.log(JSON.stringify(body, null, 2));
     return;
   }
@@ -113,44 +126,82 @@ async function main() {
   }
 
   if (action === 'swap') {
+    const pairs = unwrap(await client.swap.pair.getAllPairsForPublic({}), 'getAllPairsForPublic');
+    const pair = pairs.find((item) => item.primary_currency === 'usdt' && item.secondary_currency === 'cop');
+    if (!pair) throw new Error('USDT/COP pair not found');
     const payload = {
-      userId,
-      primary_currency: 'usdt',
-      secondary_currency: 'cop',
-      from_currency: 'usdt',
-      to_currency: 'cop',
-      amount: String(args.amount),
-      primary_amount: String(args.amount),
-      fromAccountId: args.from_account_id,
-      toAccountId: args.to_account_id,
-      from_account_id: args.from_account_id,
-      to_account_id: args.to_account_id
+      want_to_spend: String(args.amount),
+      pair_id: pair.id,
+      account_from: args.from_account_id,
+      country: 'international'
     };
     body = unwrap(await client.swap.swap.addNewSwapPublic(payload), 'addNewSwapPublic');
-    const copReceived = pickNumber(body, ['secondary_amount', 'to_amount', 'amount_received', 'received_amount', 'cop_received']);
-    const sellPrice = pickNumber(body, ['sell_price', 'price', 'rate']);
-    console.log(JSON.stringify({ id: firstId(body), status: body.state || body.status || 'submitted', cop_received: copReceived, sell_price: sellPrice, raw: body }, null, 2));
+    const swapId = firstId(body);
+    const finalSwap = swapId ? await pollById(async (id) => {
+      const rows = unwrap(await client.swap.user.__get__swaps(JSON.stringify({ where: { id } })), '__get__swaps');
+      return Array.isArray(rows) ? rows[0] : rows;
+    }, swapId) : body;
+    const result = finalSwap || body;
+    const copReceived = pickNumber(result, ['real_bought', 'bought', 'secondary_amount', 'to_amount', 'amount_received', 'received_amount', 'cop_received']);
+    const sellPrice = pickNumber(result, ['action_price', 'sell_price', 'price', 'rate']) || pickNumber(pair, ['sell_price']);
+    console.log(JSON.stringify({ id: swapId, status: result.state || result.status || body.state || 'submitted', cop_received: copReceived, sell_price: sellPrice, pair, raw: result, created: body }, null, 2));
     return;
   }
 
   if (action === 'breb-withdraw') {
-    const resolved = unwrap(await client.withdraw.withdrawAccount.resolveBrebAliasPublic({ alias: args.breb_key }), 'resolveBrebAliasPublic');
-    const withdrawAccountId = firstId(resolved) || resolved.withdrawAccountId || resolved.withdraw_account_id;
-    const payload = {
-      userId,
+    const brebKey = String(args.breb_key || '').trim();
+    const resolved = unwrap(await client.withdraw.withdrawAccount.resolveBrebAliasPublic({
+      alias: brebKey,
+      country: 'international'
+    }), 'resolveBrebAliasPublic');
+    const providers = unwrap(await client.withdraw.withdrawProvider.find(JSON.stringify({
+      where: { provider_type: 'breb' },
+      limit: 20
+    })), 'withdrawProvider.find');
+    const brebProvider = providers.find((item) => item.provider_type === 'breb' && item.currency === 'cop');
+    if (!brebProvider) throw new Error('Bre-B withdraw provider not found');
+
+    const withdrawAccount = unwrap(await client.withdraw.withdrawAccount.addNewWithdrawAccount({
+      country: 'international',
       currency: 'cop',
+      provider_type: 'breb',
+      internal: false,
+      info_needed: {
+        label: brebKey,
+        account_id: brebKey.replace(/^@/, ''),
+        country: 'colombia'
+      }
+    }), 'addNewWithdrawAccount');
+    const withdrawAccountId = firstId(withdrawAccount);
+    if (!withdrawAccountId) throw new Error(`Bre-B withdraw account response without id: ${JSON.stringify(withdrawAccount)}`);
+
+    body = unwrap(await client.withdraw.withdraw.addNewWithdrawPublic({
+      country: 'international',
+      account_id: args.from_account_id,
       amount: String(args.amount),
-      withdrawProvider: 'breb',
-      provider: 'breb',
-      alias: args.breb_key,
-      breb_alias: args.breb_key,
-      withdrawAccountId,
       withdraw_account_id: withdrawAccountId,
-      fromAccountId: args.from_account_id,
-      from_account_id: args.from_account_id
-    };
-    body = unwrap(await client.withdraw.withdraw.addNewWithdrawPublic(payload), 'addNewWithdrawPublic');
-    console.log(JSON.stringify({ id: firstId(body), status: body.state || body.status || 'submitted', amount: args.amount, currency: 'cop', resolved, raw: body }, null, 2));
+      withdraw_provider_id: brebProvider.id
+    }), 'addNewWithdrawPublic');
+    const withdrawId = firstId(body);
+    if (!withdrawId) throw new Error(`Bre-B withdraw response without id: ${JSON.stringify(body)}`);
+
+    const confirmed = unwrap(await client.withdraw.withdraw.addUpdateWithdraw({
+      withdraw_id: withdrawId,
+      state: 'confirmed',
+      country: 'international'
+    }), 'addUpdateWithdraw');
+    console.log(JSON.stringify({
+      id: withdrawId,
+      status: confirmed.state || confirmed.status || body.state || 'confirmed',
+      amount: args.amount,
+      currency: confirmed.currency || body.currency || 'cop',
+      fee: pickNumber(confirmed, ['cost']) || pickNumber(body, ['cost']),
+      net_amount: pickNumber(confirmed, ['amount_neto']) || pickNumber(body, ['amount_neto']),
+      resolved,
+      withdraw_account: withdrawAccount,
+      raw: confirmed,
+      created: body
+    }, null, 2));
     return;
   }
 
