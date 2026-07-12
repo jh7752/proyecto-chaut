@@ -87,16 +87,28 @@ async function main() {
 
   if (action === 'self-transfer') {
     const payload = {
-      userId,
-      currency: 'usdt',
+      account_id: args.from_account_id,
+      account_to: args.to_account_id,
       amount: String(args.amount),
-      fromAccountId: args.from_account_id,
-      toAccountId: args.to_account_id,
-      from_account_id: args.from_account_id,
-      to_account_id: args.to_account_id
+      country: 'international'
     };
     body = unwrap(await client.withdraw.withdraw.addNewSelfTransferPublic(payload), 'addNewSelfTransferPublic');
-    console.log(JSON.stringify({ id: firstId(body), status: body.state || body.status || 'submitted', amount: args.amount, currency: 'usdt', raw: body }, null, 2));
+    const withdrawId = firstId(body);
+    if (!withdrawId) throw new Error(`Self-transfer response without id: ${JSON.stringify(body)}`);
+
+    const confirmed = unwrap(await client.withdraw.withdraw.addUpdateWithdraw({
+      withdraw_id: withdrawId,
+      state: 'confirmed',
+      country: 'international'
+    }), 'addUpdateWithdraw');
+    console.log(JSON.stringify({
+      id: withdrawId,
+      status: confirmed.state || confirmed.status || body.state || 'confirmed',
+      amount: args.amount,
+      currency: confirmed.currency || body.currency || 'usdt',
+      raw: confirmed,
+      created: body
+    }, null, 2));
     return;
   }
 
