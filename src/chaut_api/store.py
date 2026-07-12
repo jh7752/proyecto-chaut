@@ -559,13 +559,25 @@ class SqliteOrderStore:
                 """,
                 (customer_id,),
             ).fetchall()
+            withdrawal_row = conn.execute(
+                """
+                SELECT COALESCE(SUM(cop_paid), 0) AS cop_withdrawn
+                FROM withdrawals
+                WHERE customer_id = ? AND status = 'completed'
+                """,
+                (customer_id,),
+            ).fetchone()
         entries = [_ledger_entry_from_row(row) for row in rows]
+        cop_invested = round(sum(entry.cop_gross for entry in entries if entry.entry_type == "xaut_purchase"), 2)
+        cop_withdrawn = round(float(withdrawal_row["cop_withdrawn"] if withdrawal_row else 0) or 0, 2)
         return PortfolioResponse(
             customer_id=customer_id,
             xaut_net=round(sum(entry.amount for entry in entries), 18),
             gold_grams_net=round(sum(entry.gold_grams for entry in entries), 12),
             usdt_spent=round(sum(entry.usdt_spent for entry in entries), 12),
-            cop_invested=round(sum(entry.cop_gross for entry in entries), 2),
+            cop_invested=cop_invested,
+            cop_withdrawn=cop_withdrawn,
+            cop_net_contributed=round(cop_invested - cop_withdrawn, 2),
             entries_count=len(entries),
             entries=entries,
         )

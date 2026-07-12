@@ -319,12 +319,11 @@ def send_balance(chat_id: int, user: dict[str, Any]) -> None:
         return
     lines = ["Tu oro digital 🥇"]
     lines.append(f"{portfolio['gold_grams_net']:.12f} g")
-    lines.extend(
-        [
-            f"Ingresado: {portfolio['cop_invested']:,.0f} COP",
-            f"Movimientos: {portfolio['entries_count']}",
-        ]
-    )
+    lines.append(f"Ingresado histórico: {portfolio['cop_invested']:,.0f} COP")
+    if portfolio.get("cop_withdrawn", 0):
+        lines.append(f"Retirado: {portfolio['cop_withdrawn']:,.0f} COP")
+        lines.append(f"Neto aportado: {portfolio.get('cop_net_contributed', 0):,.0f} COP")
+    lines.append(f"Movimientos: {portfolio['entries_count']}")
     buttons = [[{"text": "🥇 Ahorrar más", "callback_data": "menu:ahorros"}, {"text": "📜 Movimientos", "callback_data": "movimientos"}]]
     if portfolio.get("gold_grams_net", 0) > 0:
         buttons.append([{"text": "Retirar oro 🥇", "callback_data": "withdraw:start"}])

@@ -209,6 +209,8 @@ class PortfolioResponse(BaseModel):
     gold_grams_net: float
     usdt_spent: float
     cop_invested: float
+    cop_withdrawn: float = 0.0
+    cop_net_contributed: float = 0.0
     estimated_value_cop: float | None = None
     valuation_price_xaut_usdt: float | None = None
     valuation_rate_cop_per_usdt: float | None = None
