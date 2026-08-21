@@ -2,7 +2,15 @@
     email admin@liquidator-ex.com
 }
 
-liquidator-ex.com, www.liquidator-ex.com, admin.liquidator-ex.com, api.liquidator-ex.com, app.liquidator-ex.com {
+liquidator-ex.com, www.liquidator-ex.com {
     encode gzip zstd
-    reverse_proxy api:8000
+
+    @admin_routes path /login /logout /admin /admin/*
+    handle @admin_routes {
+        reverse_proxy api:8000
+    }
+
+    handle {
+        respond "Not Found" 404
+    }
 }

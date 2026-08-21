@@ -13,9 +13,11 @@ from .admin import (
     admin_order_detail,
     admin_orders,
     admin_withdrawals,
+    admin_csrf_token,
     clear_admin_session_response,
     create_admin_session_response,
     require_admin,
+    require_admin_csrf,
     require_admin_login,
     valid_admin_credentials,
 )
@@ -236,7 +238,13 @@ def create_app(
         settings.coinsenda_usdt_trade_account_id,
         settings.coinsenda_cop_trade_account_id,
     )
-    app = FastAPI(title="Proyecto Chaut API", version="0.1.0")
+    app = FastAPI(
+        title="Proyecto Chaut API",
+        version="0.1.0",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -317,18 +325,21 @@ def create_app(
     def admin_home(request: Request):
         expire_stale_payment_requests()
         token = require_admin_access(request)
-        return admin_dashboard(store, token)
+        csrf_token = admin_csrf_token(request, settings.admin_session_secret)
+        return admin_dashboard(store, token, csrf_token)
 
     @app.get("/admin/orders")
     def admin_orders_page(request: Request):
         expire_stale_payment_requests()
         token = require_admin_access(request)
-        return admin_orders(store, token)
+        csrf_token = admin_csrf_token(request, settings.admin_session_secret)
+        return admin_orders(store, token, csrf_token)
 
     @app.get("/admin/orders/{external_id}")
     def admin_order_page(external_id: str, request: Request):
         token = require_admin_access(request)
-        return admin_order_detail(store, external_id, token)
+        csrf_token = admin_csrf_token(request, settings.admin_session_secret)
+        return admin_order_detail(store, external_id, token, csrf_token)
 
     def _admin_redirect(external_id: str, token: str | None, redirect: str = "detail") -> RedirectResponse:
         path = f"/admin/orders/{external_id}" if redirect == "detail" else "/admin/orders"
@@ -336,26 +347,30 @@ def create_app(
         return RedirectResponse(f"{path}{suffix}", status_code=303)
 
     @app.post("/admin/orders/{external_id}/reconcile")
-    def admin_reconcile_order(external_id: str, request: Request, redirect: str = "detail"):
+    def admin_reconcile_order(external_id: str, request: Request, csrf_token: str = Form(""), redirect: str = "detail"):
         token = require_admin_access(request)
+        require_admin_csrf(request, settings.admin_session_secret, csrf_token)
         reconcile_payment(external_id)
         return _admin_redirect(external_id, token, redirect)
 
     @app.post("/admin/orders/{external_id}/prepare-xaut")
-    def admin_prepare_xaut_order(external_id: str, request: Request, redirect: str = "detail"):
+    def admin_prepare_xaut_order(external_id: str, request: Request, csrf_token: str = Form(""), redirect: str = "detail"):
         token = require_admin_access(request)
+        require_admin_csrf(request, settings.admin_session_secret, csrf_token)
         prepare_xaut_order(external_id)
         return _admin_redirect(external_id, token, redirect)
 
     @app.post("/admin/orders/{external_id}/settle-xaut")
-    def admin_settle_xaut_order(external_id: str, request: Request, confirm: str = "", redirect: str = "detail"):
+    def admin_settle_xaut_order(external_id: str, request: Request, csrf_token: str = Form(""), confirm: str = "", redirect: str = "detail"):
         token = require_admin_access(request)
+        require_admin_csrf(request, settings.admin_session_secret, csrf_token)
         settle_xaut_after_payment(external_id, confirm)
         return _admin_redirect(external_id, token, redirect)
 
     @app.post("/admin/orders/{external_id}/mark-attention")
-    def admin_mark_attention_order(external_id: str, request: Request, redirect: str = "detail"):
+    def admin_mark_attention_order(external_id: str, request: Request, csrf_token: str = Form(""), redirect: str = "detail"):
         token = require_admin_access(request)
+        require_admin_csrf(request, settings.admin_session_secret, csrf_token)
         order = store.get_order(external_id)
         if order is None:
             raise HTTPException(status_code=404, detail="Order not found")
@@ -369,18 +384,21 @@ def create_app(
     @app.get("/admin/withdrawals")
     def admin_withdrawals_page(request: Request):
         token = require_admin_access(request)
-        return admin_withdrawals(store, token)
+        csrf_token = admin_csrf_token(request, settings.admin_session_secret)
+        return admin_withdrawals(store, token, csrf_token)
 
     @app.post("/admin/withdrawals/{withdrawal_id}/confirm-payment")
-    def admin_confirm_withdrawal_payment(withdrawal_id: str, request: Request, cop_paid: float = Form(...), cop_tx_ref: str = Form(...), admin_note: str | None = Form(None)):
+    def admin_confirm_withdrawal_payment(withdrawal_id: str, request: Request, csrf_token: str = Form(""), cop_paid: float = Form(...), cop_tx_ref: str = Form(...), admin_note: str | None = Form(None)):
         token = require_admin_access(request)
+        require_admin_csrf(request, settings.admin_session_secret, csrf_token)
         confirm_withdrawal_payment(withdrawal_id, WithdrawalPaymentConfirmationRequest(cop_paid=cop_paid, cop_tx_ref=cop_tx_ref, admin_note=admin_note))
         suffix = f"?token={token}" if token else ""
         return RedirectResponse(f"/admin/withdrawals{suffix}", status_code=303)
 
     @app.post("/admin/withdrawals/{withdrawal_id}/mark-failed")
-    def admin_mark_withdrawal_failed(withdrawal_id: str, request: Request, reason: str = Form(...), admin_note: str | None = Form(None)):
+    def admin_mark_withdrawal_failed(withdrawal_id: str, request: Request, csrf_token: str = Form(""), reason: str = Form(...), admin_note: str | None = Form(None)):
         token = require_admin_access(request)
+        require_admin_csrf(request, settings.admin_session_secret, csrf_token)
         mark_withdrawal_failed(withdrawal_id, WithdrawalMarkFailedRequest(reason=reason, admin_note=admin_note))
         suffix = f"?token={token}" if token else ""
         return RedirectResponse(f"/admin/withdrawals{suffix}", status_code=303)
@@ -388,12 +406,14 @@ def create_app(
     @app.get("/admin/accounts")
     def admin_accounts_page(request: Request):
         token = require_admin_access(request)
-        return admin_accounts(store, token)
+        csrf_token = admin_csrf_token(request, settings.admin_session_secret)
+        return admin_accounts(store, token, csrf_token)
 
     @app.get("/admin/accounts/{customer_id}")
     def admin_account_page(customer_id: str, request: Request):
         token = require_admin_access(request)
-        return admin_account_detail(store, customer_id, token)
+        csrf_token = admin_csrf_token(request, settings.admin_session_secret)
+        return admin_account_detail(store, customer_id, token, csrf_token)
 
     @app.post("/accounts/identify", response_model=AccountResponse)
     def identify_account(payload: AccountIdentityRequest) -> AccountResponse:

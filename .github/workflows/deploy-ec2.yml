@@ -8,6 +8,7 @@ on:
       - 'src/**'
       - 'app/**'
       - 'Dockerfile'
+      - 'Caddyfile'
       - 'docker-compose.yml'
       - 'vendor/coinsenda/scripts/**'
       - 'pyproject.toml'

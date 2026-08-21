@@ -1,7 +1,10 @@
+import base64
 from datetime import datetime, timedelta, timezone
 from html import escape
+import hashlib
 import hmac
 import secrets
+import time
 
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -14,6 +17,30 @@ LEGACY_STATES = {"voided", "failed"}
 EXPIRED_STATES = {"expired"}
 ATTENTION_PAYMENT_STATES = {"ambiguous", "payment_reconciliation_ambiguous"}
 ATTENTION_CONVERSION_STATES = {"executing", "submitted"}
+ADMIN_SESSION_MAX_AGE_SECONDS = 60 * 60 * 12
+
+
+def _encode_session_token(payload: str, session_secret: str) -> str:
+    signature = hmac.new(session_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    encoded_payload = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+    return f"{encoded_payload}.{signature}"
+
+
+def _decode_session_token(token: str, session_secret: str) -> tuple[int, str] | None:
+    try:
+        encoded_payload, signature = token.split(".", 1)
+        padding = "=" * (-len(encoded_payload) % 4)
+        payload = base64.urlsafe_b64decode(encoded_payload + padding).decode()
+        expected = hmac.new(session_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return None
+        issued_at_text, csrf_token = payload.split(":", 1)
+        issued_at = int(issued_at_text)
+    except (ValueError, TypeError):
+        return None
+    if issued_at > int(time.time()) + 60 or int(time.time()) - issued_at > ADMIN_SESSION_MAX_AGE_SECONDS:
+        return None
+    return issued_at, csrf_token
 
 
 def require_admin(request: Request, token: str | None) -> None:
@@ -29,12 +56,27 @@ def is_admin_session(request: Request, session_secret: str | None) -> bool:
     if not session_secret:
         return False
     cookie = request.cookies.get("chaut_admin_session")
-    return bool(cookie) and hmac.compare_digest(cookie, session_secret)
+    return bool(cookie) and _decode_session_token(cookie, session_secret) is not None
 
 
 def require_admin_login(request: Request, session_secret: str | None) -> None:
     if not is_admin_session(request, session_secret):
         raise HTTPException(status_code=401, detail="Admin login required")
+
+
+def require_admin_csrf(request: Request, session_secret: str | None, csrf_token: str) -> None:
+    if not session_secret:
+        return
+    cookie = request.cookies.get("chaut_admin_session")
+    session = _decode_session_token(cookie or "", session_secret)
+    if session is None or not csrf_token or not hmac.compare_digest(session[1], csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+
+
+def admin_csrf_token(request: Request, session_secret: str | None) -> str:
+    cookie = request.cookies.get("chaut_admin_session")
+    session = _decode_session_token(cookie or "", session_secret or "")
+    return session[1] if session else ""
 
 
 def admin_login_page(error: str | None = None) -> HTMLResponse:
@@ -93,20 +135,22 @@ def admin_login_page(error: str | None = None) -> HTMLResponse:
 
 def create_admin_session_response(session_secret: str, redirect_to: str = "/admin") -> Response:
     response = RedirectResponse(redirect_to, status_code=303)
+    payload = f"{int(time.time())}:{secrets.token_urlsafe(32)}"
     response.set_cookie(
         "chaut_admin_session",
-        session_secret,
+        _encode_session_token(payload, session_secret),
         httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=60 * 60 * 12,
+        secure=True,
+        samesite="strict",
+        max_age=ADMIN_SESSION_MAX_AGE_SECONDS,
+        path="/",
     )
     return response
 
 
 def clear_admin_session_response() -> Response:
     response = RedirectResponse("/login", status_code=303)
-    response.delete_cookie("chaut_admin_session")
+    response.delete_cookie("chaut_admin_session", path="/", secure=True, samesite="strict")
     return response
 
 
@@ -120,7 +164,12 @@ def valid_admin_credentials(
     )
 
 
-def render_admin(title: str, body: str, token: str | None = None) -> HTMLResponse:
+def render_admin(
+    title: str,
+    body: str,
+    token: str | None = None,
+    csrf_token: str = "",
+) -> HTMLResponse:
     token_qs = f"?token={escape(token)}" if token else ""
     html = f"""<!doctype html>
 <html lang="es">
@@ -383,7 +432,9 @@ def render_admin(title: str, body: str, token: str | None = None) -> HTMLRespons
     return HTMLResponse(html)
 
 
-def admin_dashboard(store: OrderStore, token: str | None = None) -> HTMLResponse:
+def admin_dashboard(
+    store: OrderStore, token: str | None = None, csrf_token: str = ""
+) -> HTMLResponse:
     orders = store.list_orders(200)
     accounts = store.list_accounts(200)
     total_cop = total_xaut = total_grams = 0.0
@@ -446,10 +497,12 @@ def admin_dashboard(store: OrderStore, token: str | None = None) -> HTMLResponse
     <p class="muted">Ordenes voided o fallidas se conservan para auditoria, pero no afectan saldos.</p>
     {orders_table([order for order in orders if order.conversion_status in LEGACY_STATES][:8], token, legacy=True, events_by_order=events_map(store, [order for order in orders if order.conversion_status in LEGACY_STATES][:8]))}
     """
-    return render_admin("Dashboard", body, token)
+    return render_admin("Dashboard", body, token, csrf_token)
 
 
-def admin_orders(store: OrderStore, token: str | None = None) -> HTMLResponse:
+def admin_orders(
+    store: OrderStore, token: str | None = None, csrf_token: str = ""
+) -> HTMLResponse:
     orders = store.list_orders(200)
     active = [order for order in orders if order.conversion_status not in LEGACY_STATES]
     paid = [order for order in active if order.payment_status == "confirmed"]
@@ -461,11 +514,14 @@ def admin_orders(store: OrderStore, token: str | None = None) -> HTMLResponse:
     <div class="section-head"><h2>No pagadas</h2><span class="badge">Pendientes y expiradas</span></div><p class="muted">PaymentRequests pendientes, ambiguas o expiradas. Las expiradas usan la fecha real de vencimiento.</p>{grouped_orders_by_day(store, unpaid, token, compact=True, view="cards")}
     <div class="section-head"><h2>Legado / pruebas</h2><span class="muted">Historico</span></div>{grouped_orders_by_day(store, legacy, token, legacy=True)}
     """
-    return render_admin("Ordenes", body, token)
+    return render_admin("Ordenes", body, token, csrf_token)
 
 
 def admin_order_detail(
-    store: OrderStore, external_id: str, token: str | None = None
+    store: OrderStore,
+    external_id: str,
+    token: str | None = None,
+    csrf_token: str = "",
 ) -> HTMLResponse:
     order = store.get_order(external_id)
     if order is None:
@@ -506,11 +562,13 @@ def admin_order_detail(
     {"".join(f'<tr><td class="date">{format_bogota_time(event.created_at)}</td><td><code>{escape(event.event_type)}</code></td><td><pre>{escape(str(event.payload))}</pre></td></tr>' for event in events)}
     </table></div>
     """
-    return render_admin("Detalle Orden", body, token)
+    return render_admin("Detalle Orden", body, token, csrf_token)
 
 
 
-def admin_withdrawals(store: OrderStore, token: str | None = None) -> HTMLResponse:
+def admin_withdrawals(
+    store: OrderStore, token: str | None = None, csrf_token: str = ""
+) -> HTMLResponse:
     withdrawals = store.list_withdrawals(limit=100)
     pending = [wd for wd in withdrawals if wd.status in {"requested", "selling_xaut", "xaut_sold", "transferring_usdt", "swapping_cop", "paying_cop", "swap_failed", "payout_failed"}]
     cards = []
@@ -519,6 +577,7 @@ def admin_withdrawals(store: OrderStore, token: str | None = None) -> HTMLRespon
         if wd.status in {"xaut_sold", "paying_cop", "payout_failed"}:
             confirm_form = (
                 f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/confirm-payment{_token_qs(token)}">'
+                f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
                 '<input name="cop_paid" type="number" step="0.01" placeholder="COP pagado" required>'
                 '<input name="cop_tx_ref" placeholder="Referencia Bre-B" required>'
                 '<input name="admin_note" placeholder="Nota opcional">'
@@ -526,6 +585,7 @@ def admin_withdrawals(store: OrderStore, token: str | None = None) -> HTMLRespon
             )
         fail_form = (
             f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/mark-failed{_token_qs(token)}">'
+            f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
             '<input name="reason" placeholder="Motivo del fallo" required>'
             '<input name="admin_note" placeholder="Nota opcional">'
             '<button class="button" type="submit">Marcar fallido</button></form>'
@@ -551,9 +611,11 @@ def admin_withdrawals(store: OrderStore, token: str | None = None) -> HTMLRespon
             f'</div>{confirm_form}{fail_form}</article>'
         )
     body = "<div class='section-head'><h2>Retiros pendientes</h2></div>" + ("".join(cards) if cards else "<p class='muted'>No hay retiros.</p>")
-    return render_admin("Retiros", body, token)
+    return render_admin("Retiros", body, token, csrf_token)
 
-def admin_accounts(store: OrderStore, token: str | None = None) -> HTMLResponse:
+def admin_accounts(
+    store: OrderStore, token: str | None = None, csrf_token: str = ""
+) -> HTMLResponse:
     cards = []
     rows = []
     for account in store.list_accounts(200):
@@ -581,11 +643,14 @@ def admin_accounts(store: OrderStore, token: str | None = None) -> HTMLResponse:
         + "".join(rows)
         + "</tbody></table></div>"
     )
-    return render_admin("Usuarios", body, token)
+    return render_admin("Usuarios", body, token, csrf_token)
 
 
 def admin_account_detail(
-    store: OrderStore, customer_id: str, token: str | None = None
+    store: OrderStore,
+    customer_id: str,
+    token: str | None = None,
+    csrf_token: str = "",
 ) -> HTMLResponse:
     account = store.get_account(customer_id)
     if account is None:
@@ -629,7 +694,7 @@ def admin_account_detail(
       </div>
     </section>
     """
-    return render_admin("Usuario", body, token)
+    return render_admin("Usuario", body, token, csrf_token)
 
 
 def split_orders_timeline(store: OrderStore, orders, token: str | None = None) -> str:

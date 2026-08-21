@@ -43,6 +43,14 @@ def test_health(tmp_path) -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_api_documentation_is_disabled(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+
+
 def test_create_order_calculates_fee_and_persists(tmp_path) -> None:
     client = make_client(tmp_path)
     response = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000})
@@ -1085,7 +1093,9 @@ def test_admin_login_protects_dashboard(tmp_path) -> None:
         admin_password="secret-pass",
         admin_session_secret="session-secret",
     )
-    client = TestClient(create_app(settings=settings), follow_redirects=False)
+    client = TestClient(
+        create_app(settings=settings), base_url="https://testserver", follow_redirects=False
+    )
 
     blocked = client.get("/admin")
     assert blocked.status_code == 401
@@ -1093,10 +1103,35 @@ def test_admin_login_protects_dashboard(tmp_path) -> None:
     login = client.post("/login", data={"username": "admin", "password": "secret-pass"})
     assert login.status_code == 303
     assert login.headers["location"] == "/admin"
+    cookie = login.cookies.get("chaut_admin_session")
+    assert cookie
+    assert cookie != "session-secret"
+    set_cookie = login.headers["set-cookie"].lower()
+    assert "httponly" in set_cookie
+    assert "secure" in set_cookie
+    assert "samesite=strict" in set_cookie
 
     allowed = client.get("/admin")
     assert allowed.status_code == 200
     assert "Chaut Admin" in allowed.text
+
+
+def test_admin_rejects_missing_csrf_token(tmp_path) -> None:
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'test.db'}",
+        admin_username="admin",
+        admin_password="secret-pass",
+        admin_session_secret="session-secret",
+    )
+    client = TestClient(
+        create_app(settings=settings), base_url="https://testserver", follow_redirects=False
+    )
+    client.post("/login", data={"username": "admin", "password": "secret-pass"})
+    order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 5000}).json()
+
+    response = client.post(f"/admin/orders/{order['external_id']}/mark-attention")
+
+    assert response.status_code == 403
 
 
 def test_create_withdrawal_request_executes_full_payout_flow(monkeypatch, tmp_path) -> None:
