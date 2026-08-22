@@ -1,3 +1,5 @@
+import concurrent.futures
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -1528,6 +1530,50 @@ def test_withdrawal_blocks_double_spend_when_first_is_pending(monkeypatch, tmp_p
     )
     assert second.status_code == 409
     assert "pending withdrawal" in second.json()["detail"] or "No gold available" in second.json()["detail"]
+
+
+def test_withdrawal_balance_reservation_is_atomic(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class FailingHtxPrivateClient:
+        def place_market_sell(self, symbol, amount):
+            raise RuntimeError("keep reservation pending")
+
+    monkeypatch.setattr(
+        app_module,
+        "create_htx_private_client",
+        lambda *args, **kwargs: FailingHtxPrivateClient(),
+    )
+    client = make_client(tmp_path)
+    account = _seed_withdrawable_account(client, tmp_path, "atomic-reserve")
+    payload = {
+        "customer_id": account["customer_id"],
+        "provider": "telegram",
+        "provider_user_id": "atomic-reserve",
+        "breb_key": "@breb",
+        "portfolio_snapshot": {"xaut_net": 0.0003},
+    }
+
+    def request_withdrawal():
+        with TestClient(create_app(settings=build_settings(tmp_path))) as thread_client:
+            return thread_client.post(
+                "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL", json=payload
+            )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(lambda _: request_withdrawal(), range(2)))
+
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    successful = next(response.json() for response in responses if response.status_code == 200)
+    assert successful["status"] == "sell_review"
+    store = app_module.create_store(build_settings(tmp_path).database_url)
+    withdrawals = [
+        withdrawal
+        for withdrawal in store.list_withdrawals(limit=10)
+        if withdrawal.customer_id == account["customer_id"]
+    ]
+    assert len(withdrawals) == 1
+    assert withdrawals[0].xaut_amount == pytest.approx(0.0003)
 
 
 def test_partial_withdrawal_extracts_only_requested_xaut(monkeypatch, tmp_path) -> None:

@@ -35,7 +35,12 @@ class OrderStore(Protocol):
     def get_portfolio(self, customer_id: str) -> PortfolioResponse: ...
     def get_credit_profile(self, customer_id: str, collateral_value_cop: float | None = None) -> CreditProfileResponse: ...
     def add_withdrawal_ledger_entry(self, withdrawal_id: str, customer_id: str, gold_grams: float, xaut_amount: float, usdt_received: float | None = None, htx_order_id: str | None = None, payload: dict | None = None) -> LedgerEntryResponse: ...
-    def create_withdrawal(self, withdrawal: WithdrawalResponse) -> WithdrawalDetailResponse: ...
+    def reserve_withdrawal(
+        self,
+        withdrawal: WithdrawalResponse,
+        requested_xaut: float | None = None,
+        requested_grams: float | None = None,
+    ) -> WithdrawalDetailResponse: ...
     def get_withdrawal(self, withdrawal_id: str) -> WithdrawalDetailResponse | None: ...
     def list_withdrawals(self, status_filter: str | None = None, limit: int = 100) -> list[WithdrawalDetailResponse]: ...
     def update_withdrawal_status(self, withdrawal_id: str, status: str, **fields) -> WithdrawalDetailResponse | None: ...
@@ -644,28 +649,100 @@ class SqliteOrderStore:
         )
 
 
-    def create_withdrawal(self, withdrawal: WithdrawalResponse) -> WithdrawalDetailResponse:
+    def reserve_withdrawal(
+        self,
+        withdrawal: WithdrawalResponse,
+        requested_xaut: float | None = None,
+        requested_grams: float | None = None,
+    ) -> WithdrawalDetailResponse:
         now = datetime.now(UTC).isoformat()
-        data = withdrawal.model_dump()
-        data["updated_at"] = now
-        with self._connect() as conn:
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            balance = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(amount), 0) AS xaut_net,
+                    COALESCE(SUM(gold_grams), 0) AS gold_grams_net
+                FROM ledger_entries
+                WHERE customer_id = ?
+                """,
+                (withdrawal.customer_id,),
+            ).fetchone()
+            held = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(xaut_amount), 0) AS xaut_held,
+                    COALESCE(SUM(gold_grams), 0) AS gold_grams_held
+                FROM withdrawals
+                WHERE customer_id = ?
+                  AND (
+                    status IN ('requested', 'selling_xaut', 'sell_review')
+                    OR (
+                      status IN (
+                        'xaut_sold', 'transferring_usdt', 'swapping_cop',
+                        'paying_cop', 'swap_failed', 'payout_failed'
+                      )
+                      AND ledger_entry_id IS NULL
+                    )
+                  )
+                """,
+                (withdrawal.customer_id,),
+            ).fetchone()
+            available_xaut = float(balance["xaut_net"] or 0) - float(held["xaut_held"] or 0)
+            available_grams = float(balance["gold_grams_net"] or 0) - float(
+                held["gold_grams_held"] or 0
+            )
+            if available_xaut <= 0 or available_grams <= 0:
+                raise ValueError("no_available_balance")
+
+            requested_xaut_value = (
+                available_xaut if requested_xaut is None else float(requested_xaut)
+            )
+            requested_grams_value = (
+                available_grams if requested_grams is None else float(requested_grams)
+            )
+            tolerance = 0.000000000001
+            if (
+                requested_xaut_value <= 0
+                or requested_xaut_value - available_xaut > tolerance
+                or requested_grams_value < 0
+                or requested_grams_value - available_grams > tolerance
+            ):
+                raise ValueError("insufficient_available_balance")
+            if withdrawal.amount_mode == "all":
+                reserve_xaut = available_xaut
+                reserve_grams = available_grams
+            else:
+                reserve_xaut = requested_xaut_value
+                reserve_grams = requested_grams_value
+                if reserve_grams <= 0:
+                    raise ValueError("insufficient_available_balance")
+
             conn.execute(
                 """
                 INSERT INTO withdrawals (
                     withdrawal_id, customer_id, provider, provider_user_id, chat_id, breb_key,
-                    amount_mode, gold_grams, xaut_amount, estimated_value_cop, status, created_at, updated_at
+                    amount_mode, gold_grams, xaut_amount, estimated_value_cop, status,
+                    created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     withdrawal.withdrawal_id, withdrawal.customer_id, withdrawal.provider,
                     withdrawal.provider_user_id, withdrawal.chat_id, withdrawal.breb_key,
-                    withdrawal.amount_mode, withdrawal.gold_grams, withdrawal.xaut_amount,
+                    withdrawal.amount_mode, reserve_grams, reserve_xaut,
                     withdrawal.estimated_value_cop, withdrawal.status, withdrawal.created_at, now,
                 ),
             )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
         created = self.get_withdrawal(withdrawal.withdrawal_id)
         if created is None:
-            raise RuntimeError("Withdrawal creation failed")
+            raise RuntimeError("Withdrawal reservation failed")
         return created
 
     def get_withdrawal(self, withdrawal_id: str) -> WithdrawalDetailResponse | None:

@@ -505,33 +505,23 @@ def create_app(
         linked_account = store.get_account_by_identity(payload.provider, payload.provider_user_id)
         if linked_account is None or linked_account.customer_id != payload.customer_id:
             raise HTTPException(status_code=409, detail="Identity does not match account")
-        portfolio = _with_estimated_portfolio_value(store.get_portfolio(payload.customer_id), settings, coinsenda_client, include_markup=False)
-        if portfolio.gold_grams_net <= 0 or portfolio.xaut_net <= 0:
-            raise HTTPException(status_code=409, detail="No gold available to withdraw")
-        # Subtract pending withdrawals to prevent double-spending
-        pending = [
-            w
-            for w in store.list_withdrawals(limit=500)
-            if w.customer_id == payload.customer_id and withdrawal_needs_available_balance_hold(w)
-        ]
-        pending_xaut = sum(w.xaut_amount for w in pending)
-        available_xaut = portfolio.xaut_net - pending_xaut
-        if available_xaut <= 0:
-            raise HTTPException(status_code=409, detail="You already have a pending withdrawal")
-        if payload.portfolio_snapshot:
-            requested_xaut = float(payload.portfolio_snapshot.get("xaut_net") or portfolio.xaut_net)
-            if requested_xaut - available_xaut > 0.000000000001:
-                raise HTTPException(status_code=409, detail="Cannot withdraw more than available balance")
-        # Determine actual withdrawal amounts
-        if payload.amount_mode == "partial" and payload.portfolio_snapshot.get("xaut_net") is not None:
-            withdraw_xaut = float(payload.portfolio_snapshot["xaut_net"])
-            withdraw_grams = float(payload.portfolio_snapshot.get("gold_grams_net") or 0)
-            if withdraw_xaut <= 0 or withdraw_xaut > available_xaut + 0.000000000001:
-                raise HTTPException(status_code=409, detail="Invalid partial withdrawal amount")
-        else:
-            withdraw_xaut = portfolio.xaut_net
-            withdraw_grams = portfolio.gold_grams_net
-        withdrawal = store.create_withdrawal(WithdrawalResponse(
+        portfolio = _with_estimated_portfolio_value(
+            store.get_portfolio(payload.customer_id),
+            settings,
+            coinsenda_client,
+            include_markup=False,
+        )
+        requested_xaut = (
+            float(payload.portfolio_snapshot["xaut_net"])
+            if payload.portfolio_snapshot.get("xaut_net") is not None
+            else None
+        )
+        requested_grams = (
+            float(payload.portfolio_snapshot["gold_grams_net"])
+            if payload.portfolio_snapshot.get("gold_grams_net") is not None
+            else None
+        )
+        withdrawal_request = WithdrawalResponse(
             withdrawal_id=f"wd-{uuid4().hex[:12]}",
             customer_id=payload.customer_id,
             provider=payload.provider,
@@ -539,12 +529,32 @@ def create_app(
             chat_id=payload.chat_id,
             breb_key=" ".join(payload.breb_key.split()),
             amount_mode=payload.amount_mode,
-            gold_grams=withdraw_grams,
-            xaut_amount=withdraw_xaut,
-            estimated_value_cop=estimate_withdrawal_value_cop(portfolio, payload.portfolio_snapshot, withdraw_xaut),
+            gold_grams=requested_grams or 0,
+            xaut_amount=requested_xaut or 0,
+            estimated_value_cop=estimate_withdrawal_value_cop(
+                portfolio,
+                payload.portfolio_snapshot,
+                requested_xaut or portfolio.xaut_net,
+            ),
             status="requested",
             created_at=datetime.now(UTC).isoformat(),
-        ))
+        )
+        try:
+            withdrawal = store.reserve_withdrawal(
+                withdrawal_request,
+                requested_xaut=requested_xaut,
+                requested_grams=requested_grams,
+            )
+        except ValueError as exc:
+            if str(exc) == "no_available_balance":
+                raise HTTPException(
+                    status_code=409, detail="You already have a pending withdrawal"
+                ) from exc
+            if str(exc) == "insufficient_available_balance":
+                raise HTTPException(
+                    status_code=409, detail="Cannot withdraw more than available balance"
+                ) from exc
+            raise
         store.add_event(
             withdrawal.withdrawal_id,
             "withdrawal.requested",
