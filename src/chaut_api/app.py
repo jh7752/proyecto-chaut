@@ -74,6 +74,31 @@ from .reconciliation import reconcile_payment_status
 from .settings import Settings
 from .store import OrderStore, create_store
 
+RESERVED_WITHDRAWAL_STATUSES = {"requested", "selling_xaut", "sell_review"}
+POST_XAUT_SALE_WITHDRAWAL_STATUSES = {
+    "xaut_sold",
+    "transferring_usdt",
+    "swapping_cop",
+    "paying_cop",
+    "swap_failed",
+    "payout_failed",
+}
+def withdrawal_needs_available_balance_hold(withdrawal: WithdrawalDetailResponse) -> bool:
+    if withdrawal.status in RESERVED_WITHDRAWAL_STATUSES:
+        return True
+    if withdrawal.status in POST_XAUT_SALE_WITHDRAWAL_STATUSES:
+        return not withdrawal.ledger_entry_id
+    return False
+
+
+def withdrawal_has_external_xaut_movement(withdrawal: WithdrawalDetailResponse) -> bool:
+    return bool(
+        withdrawal.status in POST_XAUT_SALE_WITHDRAWAL_STATUSES
+        or withdrawal.htx_order_id
+        or withdrawal.ledger_entry_id
+        or withdrawal.usdt_received is not None
+    )
+
 
 def estimate_spread_profit_cop(amount_cop: int | float, sell_price: float, reference_rate: float) -> float:
     confirmed_usdt = float(amount_cop) / float(sell_price)
@@ -484,8 +509,11 @@ def create_app(
         if portfolio.gold_grams_net <= 0 or portfolio.xaut_net <= 0:
             raise HTTPException(status_code=409, detail="No gold available to withdraw")
         # Subtract pending withdrawals to prevent double-spending
-        pending = [w for w in store.list_withdrawals(limit=500)
-                   if w.customer_id == payload.customer_id and w.status in {"requested", "selling_xaut", "xaut_sold", "transferring_usdt", "swapping_cop", "paying_cop", "swap_failed", "payout_failed"}]
+        pending = [
+            w
+            for w in store.list_withdrawals(limit=500)
+            if w.customer_id == payload.customer_id and withdrawal_needs_available_balance_hold(w)
+        ]
         pending_xaut = sum(w.xaut_amount for w in pending)
         available_xaut = portfolio.xaut_net - pending_xaut
         if available_xaut <= 0:
@@ -614,7 +642,14 @@ def create_app(
         except Exception as exc:
             current_withdrawal = store.get_withdrawal(withdrawal.withdrawal_id)
             current_status = current_withdrawal.status if current_withdrawal else withdrawal.status
-            failure_status = "swap_failed" if current_status == "swapping_cop" else "payout_failed" if current_status == "paying_cop" else "failed"
+            if current_status == "swapping_cop":
+                failure_status = "swap_failed"
+            elif current_status == "paying_cop":
+                failure_status = "payout_failed"
+            elif current_status in RESERVED_WITHDRAWAL_STATUSES:
+                failure_status = "sell_review"
+            else:
+                failure_status = "failed"
             failed = store.update_withdrawal_status(
                 withdrawal.withdrawal_id,
                 failure_status,
@@ -666,6 +701,11 @@ def create_app(
         withdrawal = store.get_withdrawal(withdrawal_id)
         if withdrawal is None:
             raise HTTPException(status_code=404, detail="Withdrawal not found")
+        if withdrawal_has_external_xaut_movement(withdrawal):
+            raise HTTPException(
+                status_code=409,
+                detail="Withdrawal has external XAUT movement; keep it in review or confirm COP payment",
+            )
         failed = store.update_withdrawal_status(
             withdrawal_id,
             "failed",

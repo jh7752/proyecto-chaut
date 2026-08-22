@@ -570,7 +570,7 @@ def admin_withdrawals(
     store: OrderStore, token: str | None = None, csrf_token: str = ""
 ) -> HTMLResponse:
     withdrawals = store.list_withdrawals(limit=100)
-    pending = [wd for wd in withdrawals if wd.status in {"requested", "selling_xaut", "xaut_sold", "transferring_usdt", "swapping_cop", "paying_cop", "swap_failed", "payout_failed"}]
+    pending = [wd for wd in withdrawals if wd.status in {"requested", "selling_xaut", "sell_review", "xaut_sold", "transferring_usdt", "swapping_cop", "paying_cop", "swap_failed", "payout_failed"}]
     cards = []
     for wd in pending or withdrawals[:20]:
         confirm_form = ""
@@ -583,13 +583,15 @@ def admin_withdrawals(
                 '<input name="admin_note" placeholder="Nota opcional">'
                 '<button class="button" type="submit">Confirmar pago COP</button></form>'
             )
-        fail_form = (
-            f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/mark-failed{_token_qs(token)}">'
-            f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
-            '<input name="reason" placeholder="Motivo del fallo" required>'
-            '<input name="admin_note" placeholder="Nota opcional">'
-            '<button class="button" type="submit">Marcar fallido</button></form>'
-        )
+        fail_form = ""
+        if wd.status in {"requested", "selling_xaut", "sell_review"}:
+            fail_form = (
+                f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/mark-failed{_token_qs(token)}">'
+                f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
+                '<input name="reason" placeholder="Motivo del fallo verificado" required>'
+                '<input name="admin_note" placeholder="Nota: confirma que no hubo venta/movimiento externo">'
+                '<button class="button" type="submit">Liberar reserva verificada</button></form>'
+            )
         usdt = "" if wd.usdt_received is None else f"{wd.usdt_received:.8f}"
         price = "" if wd.xaut_sell_price is None else f"{wd.xaut_sell_price:.2f}"
         estimated = "" if wd.estimated_value_cop is None else f"{wd.estimated_value_cop:,.0f}"

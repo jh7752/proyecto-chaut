@@ -1334,7 +1334,7 @@ def test_mark_withdrawal_failed(monkeypatch, tmp_path) -> None:
         "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
         json={"customer_id": account["customer_id"], "provider": "telegram", "provider_user_id": "withdraw-failed", "breb_key": "@breb", "portfolio_snapshot": {"xaut_net": 0.0003}},
     ).json()
-    assert withdrawal["status"] == "failed"
+    assert withdrawal["status"] == "sell_review"
 
     response = client.post(
         f"/withdrawals/{withdrawal['withdrawal_id']}/mark-failed",
@@ -1344,6 +1344,55 @@ def test_mark_withdrawal_failed(monkeypatch, tmp_path) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
     assert response.json()["failure_reason"] == "manual failure"
+
+
+def test_mark_withdrawal_failed_rejects_after_xaut_sale(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class StubHtxPrivateClient:
+        def place_market_sell(self, symbol, amount):
+            return {"status": "ok", "data": "sell-post-sale"}
+
+        def order(self, order_id):
+            return {
+                "status": "ok",
+                "data": {
+                    "id": order_id,
+                    "state": "filled",
+                    "field-amount": "0.0003",
+                    "field-cash-amount": "1.4",
+                    "field-fees": "0",
+                },
+            }
+
+    class FailingPayoutClient:
+        def self_transfer_usdt(self, amount):
+            raise RuntimeError("coinsenda unavailable")
+
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    client = make_client_with_payout(tmp_path, FailingPayoutClient())
+    account = _seed_withdrawable_account(client, tmp_path, "withdraw-post-sale")
+    withdrawal = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={
+            "customer_id": account["customer_id"],
+            "provider": "telegram",
+            "provider_user_id": "withdraw-post-sale",
+            "breb_key": "@breb",
+            "portfolio_snapshot": {"xaut_net": 0.0003},
+        },
+    ).json()
+    assert withdrawal["status"] == "failed"
+    assert withdrawal["htx_order_id"] == "sell-post-sale"
+    assert withdrawal["ledger_entry_id"].startswith("led-")
+
+    response = client.post(
+        f"/withdrawals/{withdrawal['withdrawal_id']}/mark-failed",
+        json={"reason": "release reserve", "admin_note": "should not release"},
+    )
+
+    assert response.status_code == 409
+    assert "external XAUT movement" in response.json()["detail"]
 
 
 def test_trm_prefers_seticap_close_over_stale_cache(monkeypatch, tmp_path) -> None:
