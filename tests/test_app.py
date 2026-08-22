@@ -942,6 +942,65 @@ def test_admin_order_detail_shows_exchange_rates(monkeypatch, tmp_path) -> None:
     assert "Spread estimado" in response.text
 
 
+def test_admin_order_detail_shows_htx_execution_price(tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    client = make_client(tmp_path)
+    account = client.post(
+        "/accounts/identify",
+        json={"provider": "telegram", "provider_user_id": "admin-price", "display_name": "Precio HTX"},
+    ).json()
+    order = client.post(
+        "/orders",
+        json={
+            "client_id": "telegram:admin-price",
+            "customer_id": account["customer_id"],
+            "amount_cop_gross": 5000,
+        },
+    ).json()
+    store = app_module.create_store(build_settings(tmp_path).database_url)
+    stored_order = store.get_order(order["external_id"])
+    store.create_ledger_entry(
+        stored_order,
+        {
+            "order_id": "htx-execution-1",
+            "state": "filled",
+            "field_amount": "0.001",
+            "field_cash_amount": "4.5",
+            "field_fees": "0.00001",
+            "xaut_net": "0.00099",
+            "gold_grams_net": "0.030792442032",
+        },
+        {"prepared": {"ask_price": "4400"}},
+    )
+    store.add_event(
+        order["external_id"],
+        "xaut.order_filled",
+        {
+            "prepared": {"ask_price": "4400"},
+            "order": {
+                "order_id": "htx-execution-1",
+                "state": "filled",
+                "field_amount": "0.001",
+                "field_cash_amount": "4.5",
+                "field_fees": "0.00001",
+                "xaut_net": "0.00099",
+            },
+        },
+    )
+
+    response = client.get(f"/admin/orders/{order['external_id']}")
+
+    assert response.status_code == 200
+    assert "Ejecucion HTX" in response.text
+    assert "4,500.0000 USDT/XAUT" in response.text
+    assert "htx-execution-1" in response.text
+    assert "USDT ejecutado" in response.text
+    assert "4.50000000" in response.text
+    assert "XAUT bruto" in response.text
+    assert "0.001000000000000000" in response.text
+
+
 def test_admin_orders_table_shows_exchange_rate_columns(monkeypatch, tmp_path) -> None:
     import chaut_api.app as app_module
 
