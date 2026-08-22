@@ -992,13 +992,11 @@ def test_admin_order_detail_shows_htx_execution_price(tmp_path) -> None:
     response = client.get(f"/admin/orders/{order['external_id']}")
 
     assert response.status_code == 200
-    assert "Ejecucion HTX" in response.text
+    assert "Tasas aplicadas" in response.text
+    assert "Compra XAUT HTX" in response.text
     assert "4,500.0000 USDT/XAUT" in response.text
-    assert "htx-execution-1" in response.text
-    assert "USDT ejecutado" in response.text
-    assert "4.50000000" in response.text
-    assert "XAUT bruto" in response.text
-    assert "0.001000000000000000" in response.text
+    assert "Ejecucion HTX" not in response.text
+    assert "USDT ejecutado" not in response.text
 
 
 def test_admin_orders_table_shows_exchange_rate_columns(monkeypatch, tmp_path) -> None:

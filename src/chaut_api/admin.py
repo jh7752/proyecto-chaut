@@ -517,78 +517,24 @@ def admin_orders(
     return render_admin("Ordenes", body, token, csrf_token)
 
 
-def _safe_float(value) -> float | None:
+def htx_execution_price(store: OrderStore, external_id: str) -> float | None:
+    event = next(
+        (
+            event
+            for event in reversed(store.list_events(external_id))
+            if event.event_type == "xaut.order_filled"
+        ),
+        None,
+    )
+    if event is None:
+        return None
+    fill = event.payload.get("order", {})
     try:
-        if value is None or value == "":
-            return None
-        return float(value)
+        usdt_spent = float(fill.get("field_cash_amount") or 0)
+        xaut_bought = float(fill.get("field_amount") or 0)
     except (TypeError, ValueError):
         return None
-
-
-def htx_execution_summary(store: OrderStore, external_id: str) -> dict:
-    ledger = store.get_ledger_entry_for_order(external_id)
-    events = store.list_events(external_id)
-    filled_payload = next(
-        (event.payload for event in reversed(events) if event.event_type == "xaut.order_filled"),
-        {},
-    )
-    order_fill = filled_payload.get("order", {}) if isinstance(filled_payload, dict) else {}
-    payload = ledger.payload if ledger else filled_payload
-    prepared = payload.get("prepared", {}) if isinstance(payload, dict) else {}
-    allocation = payload.get("allocation", {}) if isinstance(payload, dict) else {}
-    usdt_spent = _safe_float(order_fill.get("field_cash_amount"))
-    if usdt_spent is None and ledger:
-        usdt_spent = ledger.usdt_spent
-    xaut_gross = _safe_float(order_fill.get("field_amount"))
-    xaut_net_total = _safe_float(order_fill.get("xaut_net"))
-    if xaut_net_total is None:
-        xaut_net_total = xaut_gross
-    executed_price = (usdt_spent / xaut_gross) if usdt_spent and xaut_gross else None
-    return {
-        "has_execution": bool(ledger or order_fill),
-        "htx_order_id": (ledger.exchange_order_id if ledger else None) or order_fill.get("order_id"),
-        "state": order_fill.get("state") or "-",
-        "executed_price": executed_price,
-        "prepared_ask_price": _safe_float(prepared.get("ask_price")),
-        "usdt_spent": usdt_spent,
-        "xaut_gross": xaut_gross,
-        "xaut_net_total": xaut_net_total,
-        "xaut_client": (ledger.amount if ledger else None),
-        "gold_grams_client": (ledger.gold_grams if ledger else None),
-        "chaut_spread_xaut": _safe_float(allocation.get("chaut_spread_xaut")),
-        "ledger_entry_id": (ledger.entry_id if ledger else None),
-        "ledger_created_at": (ledger.created_at if ledger else None),
-    }
-
-
-def render_htx_execution_card(summary: dict) -> str:
-    if not summary["has_execution"]:
-        return """
-      <div class="card rate-card">
-        <p class="muted">Ejecucion HTX</p>
-        <div class="metric">Pendiente</div>
-        <p class="muted">Aun no hay compra XAUT ejecutada para esta orden.</p>
-      </div>
-        """
-    return f"""
-      <div class="card rate-card">
-        <p class="muted">Ejecucion HTX</p>
-        <div class="metric">{format_decimal(summary['executed_price'], 4)} USDT/XAUT</div>
-        <div class="kv-grid">
-          <div class="kv"><span class="muted">Orden HTX</span><b><code>{escape(str(summary['htx_order_id'] or '-'))}</code></b></div>
-          <div class="kv"><span class="muted">Estado HTX</span><b>{escape(str(summary['state']))}</b></div>
-          <div class="kv"><span class="muted">Ask preparado</span><b>{format_decimal(summary['prepared_ask_price'], 4)} USDT/XAUT</b></div>
-          <div class="kv"><span class="muted">USDT ejecutado</span><b>{format_decimal(summary['usdt_spent'], 8)}</b></div>
-          <div class="kv"><span class="muted">XAUT bruto</span><b>{format_decimal(summary['xaut_gross'], 18)}</b></div>
-          <div class="kv"><span class="muted">XAUT neto total</span><b>{format_decimal(summary['xaut_net_total'], 18)}</b></div>
-          <div class="kv"><span class="muted">XAUT cliente</span><b>{format_decimal(summary['xaut_client'], 18)}</b></div>
-          <div class="kv"><span class="muted">Gramos cliente</span><b>{format_decimal(summary['gold_grams_client'], 12)} g</b></div>
-          <div class="kv"><span class="muted">XAUT Chaut/spread</span><b>{format_decimal(summary['chaut_spread_xaut'], 18)}</b></div>
-          <div class="kv"><span class="muted">Ledger</span><b><code>{escape(str(summary['ledger_entry_id'] or '-'))}</code></b></div>
-        </div>
-      </div>
-    """
+    return usdt_spent / xaut_bought if usdt_spent > 0 and xaut_bought > 0 else None
 
 
 def admin_order_detail(
@@ -604,7 +550,7 @@ def admin_order_detail(
     portfolio_link = ""
     if order.customer_id:
         portfolio_link = f'<a class="button" href="/admin/accounts/{escape(order.customer_id)}{_token_qs(token)}">Ver usuario</a>'
-    htx_summary = htx_execution_summary(store, external_id)
+    htx_price = htx_execution_price(store, external_id)
     body = f"""
     <div class="split rates-layout">
       <div class="card">
@@ -629,9 +575,9 @@ def admin_order_detail(
           <div class="kv"><span class="muted">Fecha ref.</span><b>{escape(order.reference_rate_date or "-")}</b></div>
           <div class="kv"><span class="muted">USDT cobrado</span><b>{format_decimal(order.payment_amount, 6)}</b></div>
           <div class="kv"><span class="muted">Spread estimado</span><b>{format_cop(order.spread_profit_cop_estimated)}</b></div>
+          <div class="kv"><span class="muted">Compra XAUT HTX</span><b>{format_decimal(htx_price, 4)} USDT/XAUT</b></div>
         </div>
       </div>
-      {render_htx_execution_card(htx_summary)}
     </div>
     <div class="section-head"><h2>Timeline de eventos</h2><span class="badge">{len(events)} eventos</span></div>
     <div class="table-wrap"><table><tr><th>Fecha</th><th>Tipo</th><th>Payload</th></tr>
