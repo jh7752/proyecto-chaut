@@ -11,7 +11,10 @@ ADDRESS_PATTERNS = [
 
 
 def extract_payment_instructions(inspection: dict[str, Any]) -> dict[str, Any]:
+    structured = inspection.get("instructions") or {}
     text_parts = [
+        str(structured.get("breb_alias") or ""),
+        str(structured.get("amount_cop_text") or ""),
         str(inspection.get("before") or ""),
         str(inspection.get("snapshot", {}).get("bodyText") or ""),
         str(inspection.get("after", {}).get("text") or ""),
@@ -40,15 +43,19 @@ def extract_payment_instructions(inspection: dict[str, Any]) -> dict[str, Any]:
             methods.append(method)
 
     amount_match = re.search(r"(?:Envía|Envia|Enviar)\s+([0-9.,]+)\s+COP", full_text, re.IGNORECASE)
+    amount_cop_text = structured.get("amount_cop_text") or (amount_match.group(1) if amount_match else None)
+    deposit_provider_id = structured.get("deposit_provider_id")
 
     return {
-        "status": "extracted" if addresses or methods else "not_found",
-        "methods": methods,
+        "status": "extracted" if addresses or methods or deposit_provider_id else "not_found",
+        "methods": methods or (["Bre-B"] if structured.get("breb_alias") else []),
         "addresses": addresses,
-        "amount_cop_text": amount_match.group(1) if amount_match else None,
+        "amount_cop_text": amount_cop_text,
+        "deposit_provider_id": deposit_provider_id,
         "summary": {
             "events_count": len(events),
             "has_front_text": bool(full_text.strip()),
+            "source": inspection.get("mode"),
         },
     }
 

@@ -84,10 +84,14 @@ class MockCoinsendaClient(CoinsendaClient):
         amount_cop = order.amount_cop_gross
         return {
             "mode": "mock",
-            "targetUrl": order.payment_url,
+            "payment_request_id": order.payment_request_id,
             "clickText": click_text,
-            "before": "DCOP PSE",
-            "after": {"text": f"DCOP PSE Envia {amount_cop:,} COP a @coinsendaMock123"},
+            "instructions": {
+                "deposit_provider_id": f"mock-provider-{order.external_id}",
+                "breb_alias": "@coinsendaMock123",
+                "amount_cop_text": f"{amount_cop:,}",
+            },
+            "after": {"text": f"Envia {amount_cop:,} COP a @coinsendaMock123"},
             "events": [],
         }
 
@@ -131,22 +135,14 @@ class ScriptCoinsendaClient(CoinsendaClient):
 
 
     def inspect_payment_request(self, order: OrderResponse, click_text: str) -> dict:
-        if not order.payment_url:
-            raise ValueError("Order does not have a payment_url")
-        if not click_text:
-            return self._run_json("inspect-payment-request-front.js", order.payment_url, allowed_return_codes=(0,))
-        try:
-            return self._run_json(
-                "inspect-payment-request-click.js",
-                order.payment_url,
-                click_text,
-                allowed_return_codes=(0,),
-            )
-        except RuntimeError as exc:
-            front = self._run_json("inspect-payment-request-front.js", order.payment_url, allowed_return_codes=(0,))
-            front["clickError"] = str(exc)
-            front["clickText"] = click_text
-            return front
+        if not order.payment_request_id:
+            raise ValueError("Order does not have a payment_request_id")
+        return self._run_json(
+            "get-breb-payment-instructions.js",
+            "--payment-request-id",
+            order.payment_request_id,
+            allowed_return_codes=(0,),
+        )
 
     def get_usdt_cop_pair(self) -> dict:
         return self._run_json("get-usdt-cop-pair.js", allowed_return_codes=(0,))

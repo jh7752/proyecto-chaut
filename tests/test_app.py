@@ -255,7 +255,7 @@ def test_payment_instructions_inspects_front_and_records_event(tmp_path) -> None
     assert response.status_code == 200
     body = response.json()
     assert body["external_id"] == order["external_id"]
-    assert "DCOP" in body["instructions"]["methods"]
+    assert "Bre-B" in body["instructions"]["methods"]
     events = client.get(f"/orders/{order['external_id']}/events").json()
     assert events[-1]["event_type"] == "payment_instructions.inspected"
 
@@ -305,7 +305,7 @@ def test_checkout_orchestrates_order_payment_request_and_instructions(monkeypatc
     assert body["pay_amount_cop_numeric"] == 5000
     assert body["price_slippage_cop"] == 0
     assert body["attempts"] == 1
-    assert "DCOP" in body["instructions"]["methods"]
+    assert "Bre-B" in body["instructions"]["methods"]
 
     events = client.get(f"/orders/{body['external_id']}/events").json()
     assert [event["event_type"] for event in events] == [
