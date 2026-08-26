@@ -1129,6 +1129,58 @@ def test_account_credit_profile_scores_customer_and_suggests_credit_limit(tmp_pa
     assert profile["max_ltv_percent"] > 0
 
 
+
+def test_admin_uses_net_cop_after_completed_withdrawal(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class StubHtxPrivateClient:
+        def place_market_sell(self, symbol, amount):
+            return {"status": "ok", "data": "sell-admin-net"}
+
+        def order(self, order_id):
+            return {
+                "status": "ok",
+                "data": {
+                    "id": order_id,
+                    "state": "filled",
+                    "field-amount": "0.0003",
+                    "field-cash-amount": "1.4",
+                    "field-fees": "0",
+                },
+            }
+
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    client = make_client(tmp_path)
+    account = _seed_withdrawable_account(client, tmp_path, "admin-net")
+    withdrawal = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={
+            "customer_id": account["customer_id"],
+            "provider": "telegram",
+            "provider_user_id": "admin-net",
+            "breb_key": "@breb",
+            "portfolio_snapshot": {"xaut_net": 0.0003},
+        },
+    ).json()
+    client.post(
+        f"/withdrawals/{withdrawal['withdrawal_id']}/confirm-payment",
+        json={"cop_paid": 5000, "cop_tx_ref": "breb-ref-admin"},
+    )
+
+    portfolio = client.get(f"/accounts/{account['customer_id']}/portfolio").json()
+    assert portfolio["cop_invested"] == 5000.0
+    assert portfolio["cop_withdrawn"] == 4900.0
+    assert portfolio["cop_net_contributed"] == 100.0
+
+    dashboard = client.get("/admin").text
+    accounts = client.get("/admin/accounts").text
+    detail = client.get(f"/admin/accounts/{account['customer_id']}").text
+
+    assert "100 COP netos" in dashboard
+    assert "COP neto" in accounts
+    assert "COP neto" in detail
+    assert "COP retirado" in detail
+
 def test_admin_account_detail_shows_credit_profile(tmp_path) -> None:
     client = make_client(tmp_path)
     account = client.post(
