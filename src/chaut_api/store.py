@@ -564,17 +564,28 @@ class SqliteOrderStore:
                 """,
                 (customer_id,),
             ).fetchall()
-            withdrawal_row = conn.execute(
+            paid_withdrawal_rows = conn.execute(
                 """
-                SELECT COALESCE(SUM(cop_paid), 0) AS cop_withdrawn
+                SELECT withdrawal_id, cop_paid
                 FROM withdrawals
-                WHERE customer_id = ? AND status = 'completed'
+                WHERE customer_id = ? AND cop_paid IS NOT NULL
                 """,
                 (customer_id,),
-            ).fetchone()
+            ).fetchall()
         entries = [_ledger_entry_from_row(row) for row in rows]
-        cop_invested = round(sum(entry.cop_gross for entry in entries if entry.entry_type == "xaut_purchase"), 2)
-        cop_withdrawn = round(float(withdrawal_row["cop_withdrawn"] if withdrawal_row else 0) or 0, 2)
+        purchase_entries = [entry for entry in entries if entry.entry_type == "xaut_purchase"]
+        withdrawal_entries = [entry for entry in entries if entry.entry_type == "xaut_withdrawal"]
+        cop_invested = round(sum(entry.cop_gross for entry in purchase_entries), 2)
+        purchase_xaut = sum(entry.amount for entry in purchase_entries)
+        paid_withdrawals = {str(row["withdrawal_id"]): float(row["cop_paid"] or 0) for row in paid_withdrawal_rows}
+        cop_withdrawn = 0.0
+        for entry in withdrawal_entries:
+            paid_amount = paid_withdrawals.get(entry.external_id)
+            if paid_amount is not None and paid_amount > 0:
+                cop_withdrawn += paid_amount
+            elif purchase_xaut > 0:
+                cop_withdrawn += cop_invested * abs(entry.amount) / purchase_xaut
+        cop_withdrawn = round(cop_withdrawn, 2)
         return PortfolioResponse(
             customer_id=customer_id,
             xaut_net=round(sum(entry.amount for entry in entries), 18),

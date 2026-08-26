@@ -1181,6 +1181,53 @@ def test_admin_uses_net_cop_after_completed_withdrawal(monkeypatch, tmp_path) ->
     assert "COP neto" in detail
     assert "COP retirado" in detail
 
+
+def test_portfolio_net_cop_uses_ledger_withdrawal_when_payout_is_not_completed(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class StubHtxPrivateClient:
+        def place_market_sell(self, symbol, amount):
+            return {"status": "ok", "data": "sell-ledger-only"}
+
+        def order(self, order_id):
+            return {
+                "status": "ok",
+                "data": {
+                    "id": order_id,
+                    "state": "filled",
+                    "field-amount": "0.00015",
+                    "field-cash-amount": "0.7",
+                    "field-fees": "0",
+                },
+            }
+
+    class FailingPayoutClient:
+        def self_transfer_usdt(self, amount):
+            raise RuntimeError("transfer failed after ledger debit")
+
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    client = make_client_with_payout(tmp_path, FailingPayoutClient())
+    account = _seed_withdrawable_account(client, tmp_path, "ledger-only")
+
+    withdrawal = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={
+            "customer_id": account["customer_id"],
+            "provider": "telegram",
+            "provider_user_id": "ledger-only",
+            "breb_key": "@breb",
+            "amount_mode": "partial",
+            "portfolio_snapshot": {"xaut_net": 0.00015, "gold_grams_net": 0.00466552152},
+        },
+    ).json()
+
+    assert withdrawal["status"] == "failed"
+    assert withdrawal["ledger_entry_id"].startswith("led-")
+    portfolio = client.get(f"/accounts/{account['customer_id']}/portfolio").json()
+    assert portfolio["cop_invested"] == 5000.0
+    assert portfolio["cop_withdrawn"] == 2500.0
+    assert portfolio["cop_net_contributed"] == 2500.0
+
 def test_admin_account_detail_shows_credit_profile(tmp_path) -> None:
     client = make_client(tmp_path)
     account = client.post(
