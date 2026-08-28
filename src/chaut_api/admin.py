@@ -433,7 +433,10 @@ def render_admin(
 
 
 def admin_dashboard(
-    store: OrderStore, token: str | None = None, csrf_token: str = ""
+    store: OrderStore,
+    token: str | None = None,
+    csrf_token: str = "",
+    coinsenda_balances: dict | None = None,
 ) -> HTMLResponse:
     orders = store.list_orders(200)
     accounts = store.list_accounts(200)
@@ -453,6 +456,7 @@ def admin_dashboard(
     )
     expired = sum(1 for order in active_orders if order.payment_status in EXPIRED_STATES)
     settled = sum(1 for order in active_orders if order.conversion_status in SETTLED_STATES)
+    coinsenda_balances = coinsenda_balances or {"rows": [], "error": "No consultado", "updated_at": None}
     body = f"""
     <section class="premium-hero">
       <div class="card command-card">
@@ -479,6 +483,7 @@ def admin_dashboard(
       <div class="health-item"><span class="muted">Movimientos reales</span><b>{total_entries}</b></div>
       <div class="health-item"><span class="muted">Expiradas</span><b>{expired}</b></div>
     </section>
+    {coinsenda_balances_panel(coinsenda_balances)}
     <section class="card revenue-card">
       <div class="section-head"><h2>Ingresos Chaut en XAUT</h2><span class="badge">{revenue["paid_count"]} compras con comision</span></div>
       <p class="muted">Comision/spread acumulado despues del cambio: el usuario paga COP completo y Chaut toma su ingreso al final en oro digital.</p>
@@ -515,6 +520,41 @@ def admin_orders(
     <div class="section-head"><h2>Legado / pruebas</h2><span class="muted">Historico</span></div>{grouped_orders_by_day(store, legacy, token, legacy=True)}
     """
     return render_admin("Ordenes", body, token, csrf_token)
+
+
+def coinsenda_balances_panel(snapshot: dict) -> str:
+    rows = snapshot.get("rows") or []
+    updated_at = snapshot.get("updated_at")
+    error = snapshot.get("error")
+    subtitle = (
+        f"Actualizado: {format_bogota_time(updated_at)}"
+        if updated_at
+        else "Consulta en vivo a Coinsenda"
+    )
+    if error:
+        content = f'<p class="muted">No pude consultar saldos en Coinsenda: {escape(str(error))}</p>'
+    elif not rows:
+        content = '<p class="muted">Coinsenda no retorno billeteras con saldo disponible.</p>'
+    else:
+        cards = []
+        for row in rows:
+            currency = str(row.get("currency") or "").upper()
+            available = row.get("available")
+            balance = row.get("balance")
+            amount = available if available is not None else balance
+            precision = 6 if currency == "USDT" else 2
+            formatted_amount = format_decimal(amount, precision)
+            formatted_balance = format_decimal(balance, precision)
+            cards.append(
+                f'<div class="health-item"><span class="muted">{escape(row.get("name") or currency or "Billetera")}</span>'
+                f'<b>{formatted_amount} {escape(currency)}</b><small class="muted">Total: {formatted_balance}</small></div>'
+            )
+        content = '<div class="health-strip">' + "".join(cards) + '</div>'
+    return (
+        '<section class="card">'
+        '<div class="section-head"><h2>Saldos disponibles en Coinsenda</h2>'
+        f'<span class="badge">{escape(subtitle)}</span></div>{content}</section>'
+    )
 
 
 def htx_execution_price(store: OrderStore, external_id: str) -> float | None:

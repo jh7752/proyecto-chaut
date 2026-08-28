@@ -1058,6 +1058,17 @@ def test_admin_dashboard_splits_latest_orders_by_payment_state(tmp_path) -> None
     assert unpaid["external_id"] in response.text
 
 
+def test_admin_dashboard_shows_coinsenda_available_balances(tmp_path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert "Saldos disponibles en Coinsenda" in response.text
+    assert "125.000000 USDT" in response.text
+    assert "250,000.00 COP" in response.text
+
+
 def test_admin_mark_attention_records_event(tmp_path) -> None:
     client = make_client(tmp_path)
     order = client.post("/orders", json={"client_id": "cli-test", "amount_cop_gross": 100000}).json()

@@ -6,6 +6,7 @@ from typing import Protocol
 
 
 class CoinsendaPayoutClient(Protocol):
+    def get_account_balances(self) -> list[dict]: ...
     def get_usdt_cop_sell_price(self) -> float: ...
     def self_transfer_usdt(self, amount: float) -> dict: ...
     def swap_usdt_to_cop(self, amount: float) -> dict: ...
@@ -18,6 +19,9 @@ class CoinsendaPayoutNotConfiguredError(RuntimeError):
 
 
 class DisabledCoinsendaPayoutClient:
+    def get_account_balances(self) -> list[dict]:
+        raise CoinsendaPayoutNotConfiguredError("Coinsenda payout integration is not configured")
+
     def get_usdt_cop_sell_price(self) -> float:
         raise CoinsendaPayoutNotConfiguredError("Coinsenda payout integration is not configured")
 
@@ -35,6 +39,13 @@ class DisabledCoinsendaPayoutClient:
 
 
 class MockCoinsendaPayoutClient:
+    def get_account_balances(self) -> list[dict]:
+        return [
+            {"id": "mock-usdt-payment", "name": "USDT cobros", "currency": "usdt", "balance": 125.0, "available": 125.0},
+            {"id": "mock-usdt-trade", "name": "USDT trade", "currency": "usdt", "balance": 80.0, "available": 80.0},
+            {"id": "mock-cop-trade", "name": "COP trade", "currency": "cop", "balance": 250000.0, "available": 250000.0},
+        ]
+
     def get_usdt_cop_sell_price(self) -> float:
         return 3500.0
 
@@ -77,6 +88,9 @@ class ScriptCoinsendaPayoutClient:
         self._usdt_payment_account_id = usdt_payment_account_id
         self._usdt_trade_account_id = usdt_trade_account_id
         self._cop_trade_account_id = cop_trade_account_id
+
+    def get_account_balances(self) -> list[dict]:
+        return list(self._run_json("balances").get("accounts", []))
 
     def get_usdt_cop_sell_price(self) -> float:
         return float(self._run_json("pair")["sell_price"])

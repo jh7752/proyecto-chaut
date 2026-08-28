@@ -330,6 +330,15 @@ def create_app(
         require_admin(request, settings.admin_token)
         return request.query_params.get("token")
 
+    def coinsenda_balances_snapshot() -> dict:
+        try:
+            balances = coinsenda_payout_client.get_account_balances()
+            rows = [row for row in balances if str(row.get("currency") or "").lower() in {"usdt", "cop"}]
+            rows.sort(key=lambda row: (str(row.get("currency") or ""), str(row.get("name") or "")))
+            return {"rows": rows, "updated_at": datetime.now(UTC).isoformat(), "error": None}
+        except Exception as exc:
+            return {"rows": [], "updated_at": datetime.now(UTC).isoformat(), "error": str(exc)}
+
     @app.get("/login")
     def login_page():
         return admin_login_page()
@@ -351,7 +360,7 @@ def create_app(
         expire_stale_payment_requests()
         token = require_admin_access(request)
         csrf_token = admin_csrf_token(request, settings.admin_session_secret)
-        return admin_dashboard(store, token, csrf_token)
+        return admin_dashboard(store, token, csrf_token, coinsenda_balances_snapshot())
 
     @app.get("/admin/orders")
     def admin_orders_page(request: Request):

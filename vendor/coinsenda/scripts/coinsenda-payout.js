@@ -62,6 +62,20 @@ function pickNumber(payload, keys) {
   return null;
 }
 
+function normalizeAccount(account) {
+  const currency = String(account.currency || account.currency_id || account.asset || '').toLowerCase();
+  const available = pickNumber(account, ['available', 'available_balance', 'balance_available', 'amount_available']);
+  const balance = pickNumber(account, ['balance', 'amount', 'total', 'available_amount']);
+  return {
+    id: account.id || account.account_id || null,
+    name: account.name || account.label || account.alias || account.ui_name || currency.toUpperCase(),
+    currency,
+    balance: balance ?? available,
+    available: available ?? balance,
+    blocked: pickNumber(account, ['blocked', 'locked', 'hold', 'holds', 'frozen'])
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -90,6 +104,13 @@ async function main() {
   client.setUserId(userId);
 
   let body;
+  if (action === 'balances') {
+    const accounts = unwrap(await client.account.user.__get__accounts(JSON.stringify({ limit: 100 })), '__get__accounts');
+    const rows = Array.isArray(accounts) ? accounts : (accounts && accounts.rows) || [];
+    console.log(JSON.stringify({ accounts: rows.map(normalizeAccount) }, null, 2));
+    return;
+  }
+
   if (action === 'pair') {
     const pairs = unwrap(await client.swap.pair.getAllPairsForPublic({}), 'getAllPairsForPublic');
     body = pairs.find((pair) => pair.primary_currency === 'usdt' && pair.secondary_currency === 'cop');
