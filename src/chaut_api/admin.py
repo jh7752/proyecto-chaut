@@ -545,9 +545,13 @@ def coinsenda_balances_panel(snapshot: dict) -> str:
             precision = 6 if currency == "USDT" else 2
             formatted_amount = format_decimal(amount, precision)
             formatted_balance = format_decimal(balance, precision)
+            label = row.get("wallet_label") or row.get("name") or currency or "Billetera"
+            purpose = row.get("wallet_purpose") or "Billetera adicional"
+            account_id = row.get("id") or ""
             cards.append(
-                f'<div class="health-item"><span class="muted">{escape(row.get("name") or currency or "Billetera")}</span>'
-                f'<b>{formatted_amount} {escape(currency)}</b><small class="muted">Total: {formatted_balance}</small></div>'
+                f'<div class="health-item"><span class="muted">{escape(label)}</span>'
+                f'<b>{formatted_amount} {escape(currency)}</b><small class="muted">{escape(purpose)}</small>'
+                f'<small class="muted"><code>{escape(str(account_id))}</code> · Total: {formatted_balance}</small></div>'
             )
         content = '<div class="health-strip">' + "".join(cards) + '</div>'
     return (

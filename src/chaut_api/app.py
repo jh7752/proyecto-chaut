@@ -349,8 +349,18 @@ def create_app(
     def coinsenda_balances_snapshot() -> dict:
         try:
             balances = coinsenda_payout_client.get_account_balances()
-            rows = [row for row in balances if str(row.get("currency") or "").lower() in {"usdt", "cop"}]
-            rows.sort(key=lambda row: (str(row.get("currency") or ""), str(row.get("name") or "")))
+            wallet_roles = {
+                settings.coinsenda_usdt_payment_account_id: ("USDT cobros", "Recibe pagos Bre-B"),
+                settings.coinsenda_usdt_trade_account_id: ("USDT trade", "Disponible para swap"),
+                settings.coinsenda_cop_trade_account_id: ("COP trade", "Disponible para pagos Bre-B"),
+            }
+            rows = []
+            for row in balances:
+                if str(row.get("currency") or "").lower() not in {"usdt", "cop"}:
+                    continue
+                label, purpose = wallet_roles.get(str(row.get("id") or ""), (None, None))
+                rows.append({**row, "wallet_label": label, "wallet_purpose": purpose})
+            rows.sort(key=lambda row: (0 if row.get("wallet_label") else 1, str(row.get("currency") or ""), str(row.get("name") or "")))
             return {"rows": rows, "updated_at": datetime.now(UTC).isoformat(), "error": None}
         except Exception as exc:
             return {"rows": [], "updated_at": datetime.now(UTC).isoformat(), "error": str(exc)}
