@@ -170,6 +170,8 @@ class SqliteOrderStore:
                     cop_received REAL,
                     coinsenda_sell_price REAL,
                     coinsenda_withdraw_id TEXT,
+                    coinsenda_withdraw_fee_cop REAL,
+                    coinsenda_withdraw_net_cop REAL,
                     cop_paid REAL,
                     cop_tx_ref TEXT,
                     admin_note TEXT,
@@ -219,6 +221,8 @@ class SqliteOrderStore:
             "cop_received": "ALTER TABLE withdrawals ADD COLUMN cop_received REAL",
             "coinsenda_sell_price": "ALTER TABLE withdrawals ADD COLUMN coinsenda_sell_price REAL",
             "coinsenda_withdraw_id": "ALTER TABLE withdrawals ADD COLUMN coinsenda_withdraw_id TEXT",
+            "coinsenda_withdraw_fee_cop": "ALTER TABLE withdrawals ADD COLUMN coinsenda_withdraw_fee_cop REAL",
+            "coinsenda_withdraw_net_cop": "ALTER TABLE withdrawals ADD COLUMN coinsenda_withdraw_net_cop REAL",
         }
         for column, statement in migrations.items():
             if column not in existing:
@@ -779,7 +783,8 @@ class SqliteOrderStore:
         allowed = {
             "htx_order_id", "usdt_received", "xaut_sell_price", "coinsenda_self_transfer_id",
             "coinsenda_swap_id", "cop_received", "coinsenda_sell_price", "coinsenda_withdraw_id",
-            "cop_paid", "cop_tx_ref", "admin_note", "failure_reason", "ledger_entry_id",
+            "coinsenda_withdraw_fee_cop", "coinsenda_withdraw_net_cop", "cop_paid", "cop_tx_ref",
+            "admin_note", "failure_reason", "ledger_entry_id",
             "processed_at", "completed_at",
         }
         values = {key: value for key, value in fields.items() if key in allowed}

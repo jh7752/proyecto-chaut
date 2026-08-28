@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     environment: str = Field(default="dev")
     fee_percent: float = Field(default=0.0)
     portfolio_valuation_markup_percent: float = Field(default=2.0)
+    coinsenda_breb_withdraw_fee_cop: float = Field(default=3000.0)
     database_url: str = Field(default="sqlite:///./data/chaut.db")
     coinsenda_mode: str = Field(default="mock")
     coinsenda_app_origin: str = Field(default="https://app.coinsenda.com")

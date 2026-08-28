@@ -243,6 +243,22 @@ def estimate_withdrawal_value_cop(portfolio: PortfolioResponse, snapshot: dict, 
         return float(portfolio.estimated_value_cop) * float(withdraw_xaut) / float(portfolio.xaut_net)
     return portfolio.estimated_value_cop
 
+
+def coinsenda_payout_fee_amount(payout: dict) -> float | None:
+    for key in ("fee", "cost", "withdraw_fee", "transaction_fee"):
+        value = payout.get(key)
+        if value is not None and value != "":
+            return float(value)
+    return None
+
+
+def coinsenda_payout_net_amount(payout: dict, gross_amount: float, fee_amount: float | None) -> float:
+    for key in ("net_amount", "amount_neto", "amount_net", "net"):
+        value = payout.get(key)
+        if value is not None and value != "":
+            return float(value)
+    return round(float(gross_amount) - float(fee_amount or 0), 2)
+
 def create_app(
     settings: Settings | None = None,
     store: OrderStore | None = None,
@@ -644,11 +660,17 @@ def create_app(
             store.add_event(swapped.withdrawal_id, "withdrawal.paying_cop", swapped.model_dump())
             payout = coinsenda_payout_client.send_cop_via_breb(swapped.breb_key, cop_received)
             withdraw_id = str(payout.get("id") or payout.get("withdraw_id") or "") or None
+            breb_fee = coinsenda_payout_fee_amount(payout)
+            if breb_fee is None:
+                breb_fee = settings.coinsenda_breb_withdraw_fee_cop
+            breb_net = coinsenda_payout_net_amount(payout, cop_received, breb_fee)
             completed = store.update_withdrawal_status(
                 swapped.withdrawal_id,
                 "completed",
                 coinsenda_withdraw_id=withdraw_id,
-                cop_paid=cop_received,
+                coinsenda_withdraw_fee_cop=breb_fee,
+                coinsenda_withdraw_net_cop=breb_net,
+                cop_paid=breb_net,
                 cop_tx_ref=withdraw_id,
                 completed_at=datetime.now(UTC).isoformat(),
             )

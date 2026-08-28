@@ -252,6 +252,8 @@ class WithdrawalDetailResponse(WithdrawalResponse):
     cop_received: float | None = None
     coinsenda_sell_price: float | None = None
     coinsenda_withdraw_id: str | None = None
+    coinsenda_withdraw_fee_cop: float | None = None
+    coinsenda_withdraw_net_cop: float | None = None
     cop_paid: float | None = None
     cop_tx_ref: str | None = None
     admin_note: str | None = None

@@ -64,11 +64,15 @@ class MockCoinsendaPayoutClient:
         }
 
     def send_cop_via_breb(self, breb_key: str, amount: float) -> dict:
+        gross = round(float(amount), 2)
+        fee = min(100.0, gross)
         return {
             "id": "mock-breb-withdraw",
             "breb_key": breb_key,
-            "amount": round(float(amount), 2),
+            "amount": gross,
             "currency": "cop",
+            "fee": fee,
+            "net_amount": round(gross - fee, 2),
             "status": "accepted",
         }
 

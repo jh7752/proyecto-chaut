@@ -658,6 +658,8 @@ def admin_withdrawals(
         price = "" if wd.xaut_sell_price is None else f"{wd.xaut_sell_price:.2f}"
         estimated = "" if wd.estimated_value_cop is None else f"{wd.estimated_value_cop:,.0f}"
         cop_received = "" if wd.cop_received is None else f"{wd.cop_received:,.2f}"
+        coinsenda_fee = "" if wd.coinsenda_withdraw_fee_cop is None else f"{wd.coinsenda_withdraw_fee_cop:,.2f}"
+        cop_paid = "" if wd.cop_paid is None else f"{wd.cop_paid:,.2f}"
         coinsenda_price = "" if wd.coinsenda_sell_price is None else f"{wd.coinsenda_sell_price:,.2f}"
         cards.append(
             f'<article class="card"><p class="eyebrow">{escape(wd.status)}</p>'
@@ -668,7 +670,9 @@ def admin_withdrawals(
             f'<div><span class="muted">USDT recibido</span><br>{usdt}</div>'
             f'<div><span class="muted">Precio venta</span><br>{price}</div>'
             f'<div><span class="muted">Valor COP estimado</span><br>{estimated}</div>'
-            f'<div><span class="muted">COP swap</span><br>{cop_received}</div>'
+            f'<div><span class="muted">COP bruto swap</span><br>{cop_received}</div>'
+            f'<div><span class="muted">Costo retiro Bre-B</span><br>{coinsenda_fee}</div>'
+            f'<div><span class="muted">COP neto enviado</span><br>{cop_paid}</div>'
             f'<div><span class="muted">Tasa Coinsenda</span><br>{coinsenda_price}</div>'
             f'<div><span class="muted">Bre-B Coinsenda</span><br><code>{escape(str(wd.coinsenda_withdraw_id or ""))}</code></div>'
             f'<div><span class="muted">Llave Bre-B</span><br><code>{escape(wd.breb_key)}</code></div>'

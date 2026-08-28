@@ -300,6 +300,19 @@ def format_cop(value: float | int | None) -> str:
     return f"{float(value):,.0f}"
 
 
+COINSENDA_BREB_WITHDRAW_FEE_COP = 3000
+
+
+def withdrawal_cost_lines(estimated_cop: float | int | None) -> list[str]:
+    if estimated_cop is None:
+        return []
+    net_estimated = max(float(estimated_cop) - COINSENDA_BREB_WITHDRAW_FEE_COP, 0)
+    return [
+        f"Costo retiro Bre-B: {format_cop(COINSENDA_BREB_WITHDRAW_FEE_COP)} COP",
+        f"Neto estimado a recibir: {format_cop(net_estimated)} COP",
+    ]
+
+
 def portfolio_for_user(chat_id: int, user: dict[str, Any], *, include_markup: bool = True) -> dict[str, Any] | None:
     if not account_exists(user.get("id", chat_id)):
         return None
@@ -345,7 +358,8 @@ def start_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
         f"Disponible: {portfolio['gold_grams_net']:.12f} g",
     ]
     if estimated_cop is not None:
-        lines.append(f"Cotización aprox: {format_cop(estimated_cop)} COP")
+        lines.append(f"Cotización aprox bruta: {format_cop(estimated_cop)} COP")
+        lines.extend(withdrawal_cost_lines(estimated_cop))
     lines.append("\n¿Cuánto quieres retirar?")
     send_text(
         chat_id,
@@ -370,7 +384,8 @@ def ask_partial_withdrawal_amount(chat_id: int, user: dict[str, Any]) -> None:
     send_text(
         chat_id,
         f"¿Cuánto quieres retirar?\n\nDisponible: {portfolio['gold_grams_net']:.12f} g"
-        + (f" (~{format_cop(estimated_cop)} COP)" if estimated_cop else "")
+        + (f" (~{format_cop(estimated_cop)} COP bruto)" if estimated_cop else "")
+        + (f"\nCosto retiro Bre-B: {format_cop(COINSENDA_BREB_WITHDRAW_FEE_COP)} COP" if estimated_cop else "")
         + "\n\nEscribe el monto en COP. Ejemplo: 50.000",
         buttons=[[{"text": "Cancelar", "callback_data": "withdraw:cancel"}]],
     )
@@ -467,7 +482,8 @@ def handle_withdrawal_key(chat_id: int, user: dict[str, Any], text: str) -> None
     else:
         estimated_cop = portfolio.get("estimated_value_cop")
         if estimated_cop is not None:
-            lines.append(f"Cotización aprox: {format_cop(estimated_cop)} COP")
+            lines.append(f"Cotización aprox bruta: {format_cop(estimated_cop)} COP")
+            lines.extend(withdrawal_cost_lines(estimated_cop))
     lines.extend([f"Llave Bre-B: {breb_key}", "", "¿Confirmas?"])
     send_text(
         chat_id,
@@ -512,7 +528,12 @@ def confirm_withdrawal(chat_id: int, user: dict[str, Any]) -> None:
         lines.append(f"Cotización aprox: {format_cop(estimated_cop)} COP")
     status = withdrawal.get("status")
     if status == "completed":
-        lines.append(f"Te enviamos {format_cop(withdrawal.get('cop_paid'))} COP a tu llave Bre-B.")
+        fee = withdrawal.get("coinsenda_withdraw_fee_cop")
+        gross = withdrawal.get("cop_received")
+        if fee is not None and gross is not None:
+            lines.append(f"COP bruto: {format_cop(gross)} COP")
+            lines.append(f"Costo retiro Bre-B: {format_cop(fee)} COP")
+        lines.append(f"Neto enviado: {format_cop(withdrawal.get('cop_paid'))} COP a tu llave Bre-B.")
     elif status == "xaut_sold":
         lines.append("Ya vendimos tu oro digital. Estamos transfiriendo los USDT para liquidar COP.")
     elif status == "transferring_usdt":
@@ -552,9 +573,18 @@ def notify_withdrawal_completed(chat_id: int, withdrawal: dict[str, Any]) -> Non
     if withdrawal_id in NOTIFIED_WITHDRAWALS:
         return
     NOTIFIED_WITHDRAWALS.add(withdrawal_id)
+    lines = []
+    fee = withdrawal.get("coinsenda_withdraw_fee_cop")
+    gross = withdrawal.get("cop_received")
+    if fee is not None and gross is not None:
+        lines.append(f"COP bruto: {format_cop(gross)} COP")
+        lines.append(f"Costo retiro Bre-B: {format_cop(fee)} COP")
+    lines.append(
+        f"Neto enviado: {format_cop(withdrawal.get('cop_paid'))} COP a tu llave Bre-B {withdrawal.get('breb_key')}. Ref: {withdrawal.get('cop_tx_ref')}"
+    )
     send_text(
         chat_id,
-        f"Te enviamos {format_cop(withdrawal.get('cop_paid'))} COP a tu llave Bre-B {withdrawal.get('breb_key')}. Ref: {withdrawal.get('cop_tx_ref')}",
+        "\n".join(lines),
         buttons=[[{"text": "📊 Ver saldo", "callback_data": "saldo"}]],
     )
 

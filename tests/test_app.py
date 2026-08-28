@@ -1180,14 +1180,14 @@ def test_admin_uses_net_cop_after_completed_withdrawal(monkeypatch, tmp_path) ->
 
     portfolio = client.get(f"/accounts/{account['customer_id']}/portfolio").json()
     assert portfolio["cop_invested"] == 5000.0
-    assert portfolio["cop_withdrawn"] == 4900.0
-    assert portfolio["cop_net_contributed"] == 100.0
+    assert portfolio["cop_withdrawn"] == 4800.0
+    assert portfolio["cop_net_contributed"] == 200.0
 
     dashboard = client.get("/admin").text
     accounts = client.get("/admin/accounts").text
     detail = client.get(f"/admin/accounts/{account['customer_id']}").text
 
-    assert "100 COP netos" in dashboard
+    assert "200 COP netos" in dashboard
     assert "COP neto" in accounts
     assert "COP neto" in detail
     assert "COP retirado" in detail
@@ -1345,7 +1345,7 @@ def test_create_withdrawal_request_executes_full_payout_flow(monkeypatch, tmp_pa
 
         def send_cop_via_breb(self, breb_key, amount):
             self.calls.append(("breb", breb_key, amount))
-            return {"id": "breb-1", "status": "accepted"}
+            return {"id": "breb-1", "fee": 3000.0, "net_amount": 1123.0, "status": "accepted"}
 
         def check_withdraw_status(self, withdraw_id):
             return {"id": withdraw_id, "status": "accepted"}
@@ -1390,7 +1390,9 @@ def test_create_withdrawal_request_executes_full_payout_flow(monkeypatch, tmp_pa
     assert body["cop_received"] == 4123.0
     assert body["coinsenda_sell_price"] == 3100.0
     assert body["coinsenda_withdraw_id"] == "breb-1"
-    assert body["cop_paid"] == 4123.0
+    assert body["coinsenda_withdraw_fee_cop"] == 3000.0
+    assert body["coinsenda_withdraw_net_cop"] == 1123.0
+    assert body["cop_paid"] == 1123.0
     assert body["ledger_entry_id"].startswith("led-")
     assert payout_client.calls == [("self_transfer", 1.33), ("price", None), ("swap", 1.33), ("breb", "@brebTest", 4123.0)]
     assert StubHtxPrivateClient.calls == 1
@@ -1471,8 +1473,10 @@ def test_confirm_payment_updates_withdrawal_to_completed(monkeypatch, tmp_path) 
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "completed"
-    assert body["cop_paid"] == 4900.0
+    assert body["cop_paid"] == 4800.0
     assert body["coinsenda_withdraw_id"] == "mock-breb-withdraw"
+    assert body["coinsenda_withdraw_fee_cop"] == 100.0
+    assert body["coinsenda_withdraw_net_cop"] == 4800.0
     assert body["completed_at"] is not None
 
 
