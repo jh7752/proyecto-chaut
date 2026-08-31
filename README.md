@@ -232,7 +232,7 @@ Validacion de precio: `/checkout` compara `pay_amount_cop` contra `amount_cop`. 
 
 ### Exchange Worker SSM Bridge
 
-Chaut Core usa el worker de Mumbai sin abrir puertos publicos configurando los worker ids de HTX y KuCoin:
+Chaut Core usa el worker de exchanges de Mumbai (`chaut-exchange-worker-mumbai`) sin abrir puertos publicos. El nombre del recurso no forma parte de la integracion: Chaut lo referencia por su instance ID estable. Se configuran los worker ids de HTX y KuCoin así:
 
 ```text
 CHAUT_HTX_WORKER_INSTANCE_ID=i-02a3c86e7d934c601

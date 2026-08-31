@@ -1,11 +1,10 @@
-# Infraestructura
+# Infraestructura activa
 
-Pendiente de definir como IaC. Opcion inicial recomendada:
+Chaut opera sobre dos instancias EC2:
 
-- AWS Lambda para API liviana.
-- API Gateway HTTP API.
-- DynamoDB para ordenes/eventos.
-- SSM Parameter Store para configuracion no sensible.
-- Secrets Manager para credenciales externas.
+- `chaut-dev` en `us-east-1`: API, bot, Caddy y SQLite persistente.
+- `chaut-exchange-worker-mumbai` en `ap-south-1`: salida estable para APIs privadas de HTX y KuCoin mediante SSM.
 
-No desplegar recursos pagos sin confirmacion de Johan.
+El despliegue se realiza desde GitHub Actions con OIDC y SSM. El stack serverless inicial fue retirado el 2026-08-31 al comprobar que Lambda, API Gateway y las tablas DynamoDB no tenian trafico, datos ni dependencias activas.
+
+No crear recursos pagos nuevos sin confirmacion de Johan.
