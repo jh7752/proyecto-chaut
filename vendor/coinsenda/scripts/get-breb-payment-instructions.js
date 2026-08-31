@@ -18,22 +18,32 @@ function parseArgs(argv) {
 
 async function coinsendaPublicPost(pathname, data) {
   const origin = process.env.COINSENDA_APP_ORIGIN || 'https://app.coinsenda.com';
-  const response = await fetch(`https://deposit.coinsenda.com/api/${pathname}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Origin: origin,
-      Referer: origin,
-      'User-Agent': 'Chaut Payments/1.0'
-    },
-    body: JSON.stringify({ data })
-  });
-  const body = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(`coinsenda_public_${response.status}:${JSON.stringify(body)}`);
+  const timeoutMs = Number(process.env.COINSENDA_PUBLIC_TIMEOUT_MS || 45000);
+  const startedAt = Date.now();
+  console.error(JSON.stringify({ event: 'coinsenda_public.request', pathname, started_at: new Date(startedAt).toISOString() }));
+  try {
+    const response = await fetch(`https://deposit.coinsenda.com/api/${pathname}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Origin: origin,
+        Referer: origin,
+        'User-Agent': 'Chaut Payments/1.0'
+      },
+      body: JSON.stringify({ data }),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    const body = await response.json().catch(() => null);
+    console.error(JSON.stringify({ event: 'coinsenda_public.response', pathname, status: response.status, elapsed_ms: Date.now() - startedAt }));
+    if (!response.ok) {
+      throw new Error(`coinsenda_public_${response.status}:${JSON.stringify(body)}`);
+    }
+    return body?.data || body;
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'coinsenda_public.error', pathname, elapsed_ms: Date.now() - startedAt, message: String(err?.message || err) }));
+    throw err;
   }
-  return body?.data || body;
 }
 
 function firstString(...values) {

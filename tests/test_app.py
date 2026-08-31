@@ -29,6 +29,7 @@ def build_settings(tmp_path, **overrides):
         "admin_username": None,
         "admin_password": None,
         "admin_session_secret": None,
+        "payment_instructions_retry_delay_seconds": 0,
     }
     values.update(overrides)
     return Settings(**values)
@@ -372,6 +373,64 @@ def test_checkout_retries_when_price_slippage_exceeds_tolerance(monkeypatch, tmp
     assert "checkout.replaced" in first_event_types
 
 
+class RetrySamePaymentRequestCoinsendaClient(AcceptedCoinsendaClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.created_payment_requests = 0
+        self.inspected_payment_request_ids = []
+
+    def create_payment_request(self, *args, **kwargs):
+        self.created_payment_requests += 1
+        return super().create_payment_request(*args, **kwargs)
+
+    def inspect_payment_request(self, order, click_text: str):
+        self.inspected_payment_request_ids.append(order.payment_request_id)
+        if len(self.inspected_payment_request_ids) == 1:
+            raise RuntimeError("temporary Coinsenda provider error")
+        return {
+            "mode": "mock",
+            "targetUrl": order.payment_url,
+            "clickText": click_text,
+            "after": {"text": "Envia 5,000 COP a @coinsendaSamePr123"},
+            "events": [],
+        }
+
+
+def test_checkout_retries_same_payment_request_after_22_seconds(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    sleeps = []
+    monkeypatch.setattr(app_module.time, "sleep", sleeps.append)
+    monkeypatch.setattr(app_module, "get_usdt_cop_sell_price", lambda: 3527.5)
+    coinsenda = RetrySamePaymentRequestCoinsendaClient()
+    settings = build_settings(
+        tmp_path,
+        payment_instructions_retry_delay_seconds=22,
+        payment_instructions_max_attempts=2,
+    )
+    client = TestClient(create_app(settings=settings, coinsenda_client=coinsenda))
+
+    response = client.post("/checkout", json={"client_id": "cli-retry", "amount_cop": 5000})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checkout_status"] == "ready"
+    assert body["attempts"] == 1
+    assert coinsenda.created_payment_requests == 1
+    assert coinsenda.inspected_payment_request_ids == [body["payment_request_id"]] * 2
+    assert sleeps == [22]
+    events = client.get(f"/orders/{body['external_id']}/events").json()
+    assert [event["event_type"] for event in events] == [
+        "order.created",
+        "payment_request.created",
+        "payment_instructions.retry_scheduled",
+        "payment_instructions.inspected",
+    ]
+    assert events[2]["payload"]["retry_delay_seconds"] == 22
+    assert events[-1]["payload"]["instruction_attempts"][0]["status"] == "provider_error"
+    assert events[-1]["payload"]["instruction_attempts"][1]["status"] == "received"
+
+
 class UnverifiedCoinsendaClient(AcceptedCoinsendaClient):
     def inspect_payment_request(self, order, click_text: str):
         return {
@@ -383,7 +442,7 @@ class UnverifiedCoinsendaClient(AcceptedCoinsendaClient):
         }
 
 
-def test_checkout_voids_unverified_retry_attempt_and_returns_final_unverified(monkeypatch, tmp_path) -> None:
+def test_checkout_keeps_same_payment_request_when_instructions_remain_unverified(monkeypatch, tmp_path) -> None:
     import chaut_api.app as app_module
 
     prices = iter([3423.99, 3423.98])
@@ -405,13 +464,15 @@ def test_checkout_voids_unverified_retry_attempt_and_returns_final_unverified(mo
     assert body["checkout_status"] == "price_unverified"
     assert body["pay_to"] is None
     assert body["pay_amount_cop"] is None
-    first_external_id = body["instructions"]["checkout_attempts"][0]["external_id"]
-    final_external_id = body["external_id"]
-    assert first_external_id != final_external_id
-    assert client.get(f"/orders/{first_external_id}").json()["payment_status"] == "voided"
-    assert client.get(f"/orders/{final_external_id}").json()["payment_status"] == "pending"
-    first_event_types = [event["event_type"] for event in client.get(f"/orders/{first_external_id}/events").json()]
-    assert "checkout.replaced" in first_event_types
+    assert body["attempts"] == 1
+    assert client.get(f"/orders/{body['external_id']}").json()["payment_status"] == "pending"
+    event_types = [
+        event["event_type"]
+        for event in client.get(f"/orders/{body['external_id']}/events").json()
+    ]
+    assert event_types.count("payment_instructions.retry_scheduled") == 1
+    assert event_types.count("payment_instructions.unavailable") == 1
+    assert "checkout.replaced" not in event_types
 
 
 def test_account_identify_creates_and_updates_customer(tmp_path) -> None:

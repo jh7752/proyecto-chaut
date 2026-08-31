@@ -1,4 +1,6 @@
+import subprocess
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -979,8 +981,38 @@ def create_app(
                 },
             )
 
-            inspection = coinsenda_client.inspect_payment_request(updated_order, payload.method)
+            instruction_attempts = []
+            inspection = {}
             instructions = extract_payment_instructions(inspection)
+            for instruction_attempt in range(1, settings.payment_instructions_max_attempts + 1):
+                try:
+                    inspection = coinsenda_client.inspect_payment_request(updated_order, payload.method)
+                    instructions = extract_payment_instructions(inspection)
+                    primary_address = (instructions.get("addresses") or [{}])[0].get("address")
+                    status = "received" if primary_address and instructions.get("amount_cop_text") else "incomplete"
+                except (subprocess.TimeoutExpired, RuntimeError) as exc:
+                    status = "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "provider_error"
+                    instruction_attempts.append({"attempt": instruction_attempt, "status": status, "error": str(exc)[:500]})
+                else:
+                    instruction_attempts.append({"attempt": instruction_attempt, "status": status})
+                    if status == "received":
+                        break
+
+                will_retry = instruction_attempt < settings.payment_instructions_max_attempts
+                store.add_event(
+                    updated_order.external_id,
+                    "payment_instructions.retry_scheduled" if will_retry else "payment_instructions.unavailable",
+                    {
+                        "checkout_attempt": attempt_number,
+                        "instruction_attempt": instruction_attempt,
+                        "payment_request_id": updated_order.payment_request_id,
+                        "retry_delay_seconds": settings.payment_instructions_retry_delay_seconds if will_retry else None,
+                        "attempt_result": instruction_attempts[-1],
+                    },
+                )
+                if will_retry:
+                    time.sleep(settings.payment_instructions_retry_delay_seconds)
+
             pay_amount_cop = parse_cop_amount(instructions.get("amount_cop_text"))
             price_slippage_cop = None
             checkout_status = "price_unverified"
@@ -1017,10 +1049,11 @@ def create_app(
                     "click_text": payload.method,
                     "instructions": instructions,
                     "inspection": inspection,
+                    "instruction_attempts": instruction_attempts,
                     "price_validation": attempt,
                 },
             )
-            if checkout_status != "ready" and attempt_number < max_attempts:
+            if checkout_status == "price_mismatch" and attempt_number < max_attempts:
                 replaced_order = store.update_payment_status(updated_order.external_id, "voided")
                 if replaced_order is not None:
                     store.add_event(
@@ -1038,7 +1071,7 @@ def create_app(
                 "sell_price": sell_price,
                 "attempt": attempt,
             }
-            if checkout_status == "ready":
+            if checkout_status != "price_mismatch":
                 break
 
             store.add_event(

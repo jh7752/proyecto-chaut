@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     coinsenda_mode: str = Field(default="mock")
     coinsenda_app_origin: str = Field(default="https://app.coinsenda.com")
     coinsenda_runtime_dir: str = Field(default="./vendor/coinsenda")
+    payment_instructions_retry_delay_seconds: float = Field(default=22.0, ge=0, le=120)
+    payment_instructions_max_attempts: int = Field(default=2, ge=1, le=5)
     coinsenda_usdt_payment_account_id: str = Field(default="69f3e0313cb748002ae1e871")
     coinsenda_usdt_trade_account_id: str = Field(default="69f295313cb748002ae1dc6b")
     coinsenda_cop_trade_account_id: str = Field(default="69f295393cb748002ae1dc73")
