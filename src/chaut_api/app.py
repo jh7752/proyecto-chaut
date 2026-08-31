@@ -31,12 +31,6 @@ from .htx import (
     summarize_filled_order,
     summarize_sold_order,
 )
-from .kucoin import (
-    create_kucoin_client,
-    create_kucoin_private_client,
-    summarize_accounts,
-)
-
 from .coinsenda import (
     CoinsendaClient,
     calculate_usdt_from_cop,
@@ -48,9 +42,6 @@ from .models import (
     AccountIdentityRequest,
     AccountResponse,
     CreditProfileResponse,
-    KucoinHealthResponse,
-    KucoinInstrumentResponse,
-    KucoinTickerResponse,
     CheckoutRequest,
     CheckoutResponse,
     CreateOrderRequest,
@@ -786,30 +777,6 @@ def create_app(
         client = create_htx_private_client(settings.htx_worker_instance_id, settings.htx_worker_region)
         payload = client.accounts()
         return {"source": "htx-worker-ssm" if settings.htx_worker_instance_id else "htx-direct", "accounts": summarize_htx_accounts(payload)}
-
-    @app.get("/kucoin/health", response_model=KucoinHealthResponse)
-    def kucoin_health() -> KucoinHealthResponse:
-        return KucoinHealthResponse(**create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol).health())
-
-    @app.get("/kucoin/xaut-ticker", response_model=KucoinTickerResponse)
-    def kucoin_xaut_ticker() -> KucoinTickerResponse:
-        return KucoinTickerResponse(**create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol).get_xaut_ticker())
-
-    @app.get("/kucoin/xaut-instrument", response_model=KucoinInstrumentResponse)
-    def kucoin_xaut_instrument() -> KucoinInstrumentResponse:
-        return KucoinInstrumentResponse(**create_kucoin_client(settings.kucoin_base_url, settings.kucoin_xaut_symbol).get_xaut_instrument())
-
-    @app.get("/kucoin/accounts")
-    def kucoin_accounts(currency: str | None = None) -> dict:
-        client = create_kucoin_private_client(settings.kucoin_worker_instance_id, settings.kucoin_worker_region)
-        payload = client.accounts(currency)
-        return {"source": "kucoin-worker-ssm" if settings.kucoin_worker_instance_id else "kucoin-direct", "accounts": summarize_accounts(payload)}
-
-    @app.post("/kucoin/transfer-main-to-trade")
-    def kucoin_transfer_main_to_trade(currency: str = "USDT", amount: str = "2") -> dict:
-        client = create_kucoin_private_client(settings.kucoin_worker_instance_id, settings.kucoin_worker_region)
-        payload = client.inner_transfer(currency, amount, "main", "trade")
-        return {"source": "kucoin-worker-ssm" if settings.kucoin_worker_instance_id else "kucoin-direct", "result": payload}
 
     def existing_filled_xaut_event(external_id: str) -> dict | None:
         for event in reversed(store.list_events(external_id)):

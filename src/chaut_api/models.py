@@ -136,41 +136,6 @@ class OrderResponse(BaseModel):
     ledger_entry_created_at: str | None = None
 
 
-class KucoinHealthResponse(BaseModel):
-    status: str
-    source: str
-    symbol: str
-
-
-class KucoinTickerResponse(BaseModel):
-    category: str
-    symbol: str
-    price: str | None = None
-    size: str | None = None
-    bestBid: str | None = None
-    bestBidSize: str | None = None
-    bestAsk: str | None = None
-    bestAskSize: str | None = None
-    raw: dict
-
-
-class KucoinInstrumentResponse(BaseModel):
-    category: str
-    symbol: str
-    baseCurrency: str | None = None
-    quoteCurrency: str | None = None
-    feeCurrency: str | None = None
-    baseMinSize: str | None = None
-    quoteMinSize: str | None = None
-    baseIncrement: str | None = None
-    quoteIncrement: str | None = None
-    priceIncrement: str | None = None
-    priceLimitRate: str | None = None
-    minFunds: str | None = None
-    enableTrading: bool | None = None
-    raw: dict
-
-
 class XautQuoteResponse(BaseModel):
     external_id: str
     customer_id: str | None = None

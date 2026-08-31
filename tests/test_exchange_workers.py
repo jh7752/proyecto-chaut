@@ -1,6 +1,6 @@
 import pytest
 
-from chaut_api import htx, kucoin
+from chaut_api import htx
 
 
 def test_ssm_htx_sell_client_truncates_amount_to_exchange_precision(monkeypatch) -> None:
@@ -74,29 +74,3 @@ def test_htx_sell_worker_does_not_include_buy_path() -> None:
     assert "sell-market" in script
     assert "buy-market" not in script
     assert "params[\"funds\"]" not in script
-
-
-@pytest.mark.parametrize(
-    ("action", "params"),
-    [
-        ("accounts", {}),
-        ("accounts", {"currency": "USDT"}),
-        ("inner_transfer", {"currency": "USDT", "amount": "1", "from": "main", "to": "trade"}),
-        ("place_market_buy", {"symbol": "XAUT-USDT", "funds": "1.23"}),
-    ],
-)
-def test_kucoin_worker_script_builds_valid_python_for_all_actions(action, params) -> None:
-    script = kucoin._worker_script(
-        {
-            "action": action,
-            "params": params,
-            "env": {
-                "KUCOIN_API_KEY": "fake-key",
-                "KUCOIN_API_SECRET": "fake-secret",
-                "KUCOIN_API_PASSPHRASE": "fake-passphrase",
-                "KUCOIN_API_KEY_VERSION": "2",
-            },
-        }
-    )
-
-    compile(script, "<kucoin-worker>", "exec")

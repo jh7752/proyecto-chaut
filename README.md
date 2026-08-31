@@ -45,9 +45,6 @@ Endpoints principales:
 - `GET /accounts/{customer_id}` - consulta cuenta interna y sus identidades asociadas.
 - `GET /accounts/by-identity/{provider}/{provider_user_id}` - resuelve una identidad externa a cuenta interna.
 - `GET /health` - estado del servicio.
-- `GET /kucoin/health` - prueba conexion publica KuCoin para XAUT-USDT.
-- `GET /kucoin/xaut-ticker` - precio publico spot KuCoin XAUT-USDT.
-- `GET /kucoin/xaut-instrument` - filtros/precision publica del instrumento spot KuCoin XAUT-USDT.
 - `POST /orders` - crea orden draft y estimado USDT opcional.
 - `GET /orders/{external_id}` - consulta orden guardada.
 - `GET /orders/{external_id}/events` - lista eventos auditables de la orden.
@@ -67,7 +64,7 @@ Cuando una orden ya tiene `payment_status=confirmed` y `payment_currency=usdt`, 
 POST /orders/{external_id}/xaut-quote
 ```
 
-La cotizacion usa HTX como venue principal para `xautusdt`; KuCoin queda como venue secundario/consulta de respaldo. La cotizacion indicativa ya no aplica fee fijo: el ingreso de Chaut se determina en el ledger final por diferencial cambiario.
+La cotizacion usa HTX como único venue para `xautusdt`. La cotizacion indicativa ya no aplica fee fijo: el ingreso de Chaut se determina en el ledger final por diferencial cambiario.
 
 ```text
 xaut_gross = confirmed_usdt / ask_price
@@ -85,17 +82,13 @@ Esto no compra XAUT ni mueve fondos. Registra evento `xaut.quote_created`. La li
 
 ## Exchange Venues
 
-HTX es el venue principal para cotizacion y ejecucion XAUT. KuCoin queda como segundo venue/respaldo operativo para consultas y, si se habilita, operaciones secundarias.
+HTX es el único venue activo para cotizacion y ejecucion XAUT.
 
 ```text
 GET /htx/health
 GET /htx/xaut-ticker
 GET /htx/xaut-instrument
 GET /htx/accounts
-GET /kucoin/health
-GET /kucoin/xaut-ticker
-GET /kucoin/xaut-instrument
-GET /kucoin/accounts
 ```
 
 Toda funcion privada con exchanges debe ejecutarse desde el worker de Mumbai por allowlist/IP operativa. No ejecutar llamadas privadas a exchanges directamente desde el core.
@@ -232,13 +225,11 @@ Validacion de precio: `/checkout` compara `pay_amount_cop` contra `amount_cop`. 
 
 ### Exchange Worker SSM Bridge
 
-Chaut Core usa el worker de exchanges de Mumbai (`chaut-exchange-worker-mumbai`) sin abrir puertos publicos. El nombre del recurso no forma parte de la integracion: Chaut lo referencia por su instance ID estable. Se configuran los worker ids de HTX y KuCoin así:
+Chaut Core usa el worker HTX de Mumbai (`chaut-htx-worker-mumbai`) sin abrir puertos publicos. El nombre del recurso no forma parte de la integracion: Chaut lo referencia por su instance ID estable. Se configura así:
 
 ```text
 CHAUT_HTX_WORKER_INSTANCE_ID=i-02a3c86e7d934c601
 CHAUT_HTX_WORKER_REGION=ap-south-1
-CHAUT_KUCOIN_WORKER_INSTANCE_ID=i-02a3c86e7d934c601
-CHAUT_KUCOIN_WORKER_REGION=ap-south-1
 ```
 
 Si esas variables estan presentes, las funciones privadas de exchange pasan por SSM/Mumbai.

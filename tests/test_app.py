@@ -530,48 +530,6 @@ def test_reconcile_payment_confirms_accepted_matching_usdt_payment_request(tmp_p
     assert events[-1]["payload"]["validation"]["confirmed_amount"] == str(response.json()["payment_amount"])
 
 
-def test_kucoin_public_endpoints(monkeypatch, tmp_path) -> None:
-    import chaut_api.app as app_module
-
-    class StubKucoinClient:
-        def health(self):
-            return {"status": "ok", "source": "kucoin", "symbol": "XAUT-USDT"}
-
-        def get_xaut_ticker(self):
-            return {
-                "category": "spot",
-                "symbol": "XAUT-USDT",
-                "price": "4710.47",
-                "bestBid": "4710.47",
-                "bestAsk": "4710.48",
-                "raw": {"code": "200000"},
-            }
-
-        def get_xaut_instrument(self):
-            return {
-                "category": "spot",
-                "symbol": "XAUT-USDT",
-                "baseCurrency": "XAUT",
-                "quoteCurrency": "USDT",
-                "baseMinSize": "0.0001",
-                "baseIncrement": "0.0001",
-                "priceIncrement": "0.01",
-                "enableTrading": True,
-                "raw": {"symbol": "XAUT-USDT"},
-            }
-
-    monkeypatch.setattr(app_module, "create_kucoin_client", lambda *args, **kwargs: StubKucoinClient())
-    client = make_client(tmp_path)
-
-    assert client.get("/kucoin/health").json() == {
-        "status": "ok",
-        "source": "kucoin",
-        "symbol": "XAUT-USDT",
-    }
-    assert client.get("/kucoin/xaut-ticker").json()["bestAsk"] == "4710.48"
-    assert client.get("/kucoin/xaut-instrument").json()["baseCurrency"] == "XAUT"
-
-
 def test_htx_public_endpoints(monkeypatch, tmp_path) -> None:
     import chaut_api.app as app_module
 

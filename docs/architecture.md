@@ -5,7 +5,7 @@
 - API y bot: contenedores Docker en la instancia EC2 `chaut-dev` de `us-east-1`.
 - Proxy HTTPS: Caddy en la misma instancia.
 - Base de datos: SQLite persistente en el volumen Docker de producción.
-- Worker de exchanges: EC2 `chaut-exchange-worker-mumbai` en `ap-south-1`, accedido por instance ID mediante SSM y sin puertos públicos entrantes.
+- Worker HTX: EC2 `chaut-htx-worker-mumbai` en `ap-south-1`, accedido por instance ID mediante SSM y sin puertos públicos entrantes.
 - Secrets: variables de entorno y parámetros seguros usados por los procesos autorizados.
 - Logs: logs de Docker y eventos append-only en la base de datos.
 - CI/CD: GitHub Actions despliega `main` en EC2 mediante SSM.
