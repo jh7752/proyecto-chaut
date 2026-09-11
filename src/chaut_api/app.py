@@ -1018,11 +1018,8 @@ def create_app(
             checkout_status = "price_unverified"
             if pay_amount_cop is not None:
                 price_slippage_cop = round(pay_amount_cop - float(payload.amount_cop), 2)
-                checkout_status = (
-                    "ready"
-                    if abs(price_slippage_cop) <= payload.max_price_slippage_cop
-                    else "price_mismatch"
-                )
+                # Bre-B bank transfers must match the requested whole-COP amount exactly.
+                checkout_status = "ready" if price_slippage_cop == 0 else "price_mismatch"
 
             attempt = {
                 "attempt": attempt_number,

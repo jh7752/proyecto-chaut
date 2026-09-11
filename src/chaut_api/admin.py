@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 import hashlib
 import hmac
+import json
 import secrets
 import time
 
@@ -306,6 +307,17 @@ def render_admin(
     .money {{ font-weight:850; letter-spacing:-.02em; white-space:nowrap; }}
     .date {{ min-width:190px; }}
     pre {{ white-space:pre-wrap; max-height:360px; overflow:auto; background:#132018; color:#f7f0d4; padding:14px; border-radius:16px; font-size:12px; line-height:1.45; }}
+    .event-list {{ display:grid; gap:10px; }}
+    .event-item {{ display:grid; grid-template-columns:190px minmax(0,1fr); gap:16px; padding:15px 17px; border:1px solid var(--line); border-radius:18px; background:var(--paper-soft); box-shadow:var(--soft-shadow); }}
+    .event-time {{ color:#8888a0; font-size:13px; line-height:1.4; }}
+    [data-theme="dark"] .event-time {{ color:#9898b8; }}
+    .event-content {{ min-width:0; }}
+    .event-title {{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:5px; }}
+    .event-title strong {{ font-size:16px; }}
+    .event-summary {{ margin:0; color:var(--leaf); line-height:1.48; overflow-wrap:anywhere; }}
+    .event-details {{ margin-top:10px; }}
+    .event-details summary {{ width:max-content; max-width:100%; cursor:pointer; color:var(--leaf); font-size:12px; font-weight:800; }}
+    .event-details pre {{ margin:9px 0 0; max-height:300px; }}
     .day-group {{ margin:0 0 24px; position:relative; }}
     .day-title {{ margin:18px 0 10px; display:inline-flex; align-items:center; gap:9px; border:1px solid var(--line); border-radius:999px; padding:8px 12px; background:rgba(255,255,255,.6); color:var(--leaf); font-weight:800; }}
     [data-theme="dark"] .day-title {{ background:rgba(255,255,255,.06); }}
@@ -385,6 +397,7 @@ def render_admin(
       table {{ min-width:720px; }} th,td {{ padding:12px; }}
       .order-card {{ grid-template-columns:1fr; padding:14px 14px 14px 40px; }}
       .order-money {{ text-align:left; }}
+      .event-item {{ grid-template-columns:1fr; gap:7px; }}
       .tab-nav {{ border-radius:22px; width:100%; }}
       .mini-grid {{ grid-template-columns:1fr; }}
     }}
@@ -581,6 +594,143 @@ def htx_execution_price(store: OrderStore, external_id: str) -> float | None:
     return usdt_spent / xaut_bought if usdt_spent > 0 and xaut_bought > 0 else None
 
 
+EVENT_LABELS = {
+    "order.created": "Orden creada",
+    "payment_request.created": "Solicitud de pago creada",
+    "payment_instructions.retry_scheduled": "Reintento de instrucciones programado",
+    "payment_instructions.unavailable": "Instrucciones de pago no disponibles",
+    "payment_instructions.inspected": "Instrucciones Bre-B obtenidas",
+    "checkout.price_mismatch": "Monto Bre-B no coincide",
+    "checkout.replaced": "Checkout reemplazado",
+    "payment.pending_or_ambiguous": "Pago pendiente",
+    "payment.confirmed": "Pago confirmado",
+    "payment.failed": "Pago fallido",
+    "payment.not_found": "Pago no encontrado",
+    "payment.reconciliation_ambiguous": "Pago requiere revision",
+    "payment.expired": "Solicitud de pago expirada",
+    "reference_rate.updated": "Tasa de referencia actualizada",
+    "xaut.quote_created": "Cotizacion XAUT creada",
+    "xaut.order_prepared": "Compra XAUT preparada",
+    "xaut.order_submitted": "Compra XAUT enviada",
+    "xaut.order_filled": "Compra XAUT completada",
+    "admin.attention_marked": "Revision manual solicitada",
+}
+
+
+def _nested(payload: dict, *path):
+    value = payload
+    for key in path:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value
+
+
+def _first_value(payload: dict, *paths):
+    for path in paths:
+        value = _nested(payload, *path)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _event_summary(event) -> str:
+    payload = event.payload or {}
+    event_type = event.event_type
+    if event_type == "order.created":
+        amount = _first_value(payload, ("amount_cop_gross",))
+        client = _first_value(payload, ("client_id",), ("customer_id",))
+        return f"Monto {format_cop(amount)} · Cliente {client or '-'}"
+    if event_type == "payment_request.created":
+        request_id = _first_value(payload, ("payment_request_id",))
+        amount = _first_value(payload, ("payment_amount",))
+        currency = str(_first_value(payload, ("payment_currency",)) or "").upper()
+        return f"PaymentRequest {request_id or '-'} · {format_decimal(amount, 6)} {currency}".strip()
+    if event_type in {"payment_instructions.inspected", "checkout.price_mismatch"}:
+        target = _first_value(payload, ("price_validation", "amount_cop"), ("target_amount_cop",))
+        actual = _first_value(
+            payload,
+            ("price_validation", "pay_amount_cop_numeric"),
+            ("attempt", "pay_amount_cop_numeric"),
+            ("instructions", "amount_cop_text"),
+        )
+        address = _first_value(payload, ("instructions", "addresses",))
+        if isinstance(address, list) and address:
+            address = address[0].get("address") if isinstance(address[0], dict) else address[0]
+        status = _first_value(payload, ("price_validation", "checkout_status"), ("attempt", "checkout_status"))
+        pieces = [f"Solicitado: {format_cop(target)}", f"Bre-B: {format_cop(actual)}"]
+        if address:
+            pieces.append(f"Llave: {address}")
+        if status:
+            pieces.append(f"Resultado: {status}")
+        return " · ".join(pieces)
+    if event_type.startswith("payment_instructions."):
+        attempt = _first_value(payload, ("instruction_attempt",))
+        result = _first_value(payload, ("attempt_result", "status"))
+        error = _first_value(payload, ("attempt_result", "error"))
+        return " · ".join(str(value) for value in (f"Intento {attempt}" if attempt else None, result, error) if value)
+    if event_type.startswith("payment."):
+        status = _first_value(payload, ("payment_status",), ("previous_status",))
+        reason = _first_value(payload, ("validation", "reason"), ("reason",))
+        request_id = _first_value(payload, ("payment_request_id",))
+        pieces = [f"Estado: {status}" if status else None, f"Motivo: {reason}" if reason else None, f"PaymentRequest: {request_id}" if request_id else None]
+        return " · ".join(str(value) for value in pieces if value) or "Evento de conciliacion registrado."
+    if event_type.startswith("xaut."):
+        status = _first_value(payload, ("status",), ("order", "state"))
+        order_id = _first_value(payload, ("order", "order_id"), ("htx", "data"))
+        grams = _first_value(payload, ("order", "gold_grams_net"), ("gold_grams_net",))
+        pieces = [f"Estado: {status}" if status else None, f"HTX: {order_id}" if order_id else None, f"Oro neto: {grams} g" if grams else None]
+        return " · ".join(str(value) for value in pieces if value) or "Operacion XAUT registrada."
+    if event_type == "checkout.replaced":
+        return f"Motivo: {payload.get('reason', '-')} · Siguiente intento: {payload.get('next_attempt', '-')}"
+    if event_type == "reference_rate.updated":
+        rate = _first_value(payload, ("reference_rate_cop_per_usdt",), ("reference_rate",))
+        source = _first_value(payload, ("reference_rate_source",), ("source",))
+        return f"{format_rate(rate)} · Fuente: {source or '-'}"
+    if event_type == "admin.attention_marked":
+        return "La orden fue marcada para revision manual."
+    return "Evento operativo registrado. Abre el detalle tecnico para consultar el payload completo."
+
+
+def payment_instruction_amount(events: list) -> float | None:
+    for event in reversed(events):
+        if event.event_type != "payment_instructions.inspected":
+            continue
+        amount = _first_value(
+            event.payload or {},
+            ("price_validation", "pay_amount_cop_numeric"),
+            ("instructions", "amount_cop_text"),
+        )
+        if amount is None:
+            continue
+        try:
+            if isinstance(amount, str):
+                amount = amount.replace(",", "")
+            return float(amount)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def event_timeline(events: list) -> str:
+    if not events:
+        return '<div class="empty">Esta orden aun no tiene eventos.</div>'
+    rows = []
+    for event in events:
+        label = EVENT_LABELS.get(event.event_type, event.event_type.replace(".", " · ").replace("_", " ").title())
+        technical = json.dumps(event.payload or {}, indent=2, ensure_ascii=False, default=str)
+        rows.append(
+            '<article class="event-item">'
+            f'<time class="event-time">{format_bogota_time(event.created_at)}</time>'
+            '<div class="event-content">'
+            f'<div class="event-title"><strong>{escape(label)}</strong><code>{escape(event.event_type)}</code></div>'
+            f'<p class="event-summary">{escape(_event_summary(event))}</p>'
+            f'<details class="event-details"><summary>Ver detalle tecnico</summary><pre>{escape(technical)}</pre></details>'
+            '</div></article>'
+        )
+    return '<div class="event-list">' + "".join(rows) + "</div>"
+
+
 def admin_order_detail(
     store: OrderStore,
     external_id: str,
@@ -595,6 +745,9 @@ def admin_order_detail(
     if order.customer_id:
         portfolio_link = f'<a class="button" href="/admin/accounts/{escape(order.customer_id)}{_token_qs(token)}">Ver usuario</a>'
     htx_price = htx_execution_price(store, external_id)
+    returned_cop = payment_instruction_amount(events)
+    returned_cop_text = format_cop(returned_cop)
+    difference_cop_text = format_cop(returned_cop - order.amount_cop_gross) if returned_cop is not None else "-"
     body = f"""
     <div class="split rates-layout">
       <div class="card">
@@ -605,9 +758,13 @@ def admin_order_detail(
         {portfolio_link}
       </div>
       <div class="card">
-        <p class="muted">Monto</p>
-        <div class="metric">{order.amount_cop_gross:,.0f} COP</div>
-        <p><b>USDT:</b> {format_decimal(order.payment_amount, 6)}</p>
+        <p class="muted">Montos del pago</p>
+        <div class="kv-grid">
+          <div class="kv"><span class="muted">Solicitado</span><b>{format_cop(order.amount_cop_gross)}</b></div>
+          <div class="kv"><span class="muted">Devuelto por Coinsenda</span><b>{returned_cop_text}</b></div>
+          <div class="kv"><span class="muted">Diferencia</span><b>{difference_cop_text}</b></div>
+          <div class="kv"><span class="muted">PaymentRequest</span><b>{format_decimal(order.payment_amount, 6)} USDT</b></div>
+        </div>
         <p><b>Creada:</b> {format_bogota_time(order.created_at)}</p>
       </div>
       <div class="card rate-card">
@@ -623,10 +780,9 @@ def admin_order_detail(
         </div>
       </div>
     </div>
-    <div class="section-head"><h2>Timeline de eventos</h2><span class="badge">{len(events)} eventos</span></div>
-    <div class="table-wrap"><table><tr><th>Fecha</th><th>Tipo</th><th>Payload</th></tr>
-    {"".join(f'<tr><td class="date">{format_bogota_time(event.created_at)}</td><td><code>{escape(event.event_type)}</code></td><td><pre>{escape(str(event.payload))}</pre></td></tr>' for event in events)}
-    </table></div>
+    <div class="section-head"><h2>Actividad de la orden</h2><span class="badge">{len(events)} eventos</span></div>
+    <p class="muted">Resumen legible para operacion. El payload completo queda disponible bajo demanda.</p>
+    {event_timeline(events)}
     """
     return render_admin("Detalle Orden", body, token, csrf_token)
 

@@ -220,7 +220,7 @@ El primer modulo queda concluido como MVP operativo:
 - Seguridad operativa: sin movimientos de fondos automaticos y sin comision fija descontada en COP.
 - Conciliacion: endpoint separado para verificar estado contra Coinsenda antes de confirmar pagos.
 
-Validacion de precio: `/checkout` compara `pay_amount_cop` contra `amount_cop`. Si el deslizamiento supera `max_price_slippage_cop`, registra `checkout.price_mismatch` y reintenta hasta `max_retries`. Si el ultimo intento sigue fuera de tolerancia, responde `checkout_status=price_mismatch` para no entregar instrucciones como listas.
+Validacion de precio: `/checkout` compara `pay_amount_cop` contra `amount_cop` y exige coincidencia exacta en COP para Bre-B. Cualquier diferencia, incluso fraccionaria (por ejemplo, 4.999,98 frente a 5.000), registra `checkout.price_mismatch` y reintenta hasta `max_retries`. Si el ultimo intento sigue distinto, responde `checkout_status=price_mismatch` para no entregar instrucciones como listas. `max_price_slippage_cop` se conserva temporalmente por compatibilidad del contrato, pero no relaja esta regla.
 
 
 ### Exchange Worker SSM Bridge

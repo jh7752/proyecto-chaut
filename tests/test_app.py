@@ -339,7 +339,7 @@ class SlippageCoinsendaClient(AcceptedCoinsendaClient):
         }
 
 
-def test_checkout_retries_when_price_slippage_exceeds_tolerance(monkeypatch, tmp_path) -> None:
+def test_checkout_retries_until_breb_amount_matches_exactly(monkeypatch, tmp_path) -> None:
     import chaut_api.app as app_module
 
     prices = iter([3550.61, 3535.69])
@@ -394,6 +394,40 @@ class RetrySamePaymentRequestCoinsendaClient(AcceptedCoinsendaClient):
             "after": {"text": "Envia 5,000 COP a @coinsendaSamePr123"},
             "events": [],
         }
+
+
+class FractionalMismatchCoinsendaClient(AcceptedCoinsendaClient):
+    def inspect_payment_request(self, order, click_text: str):
+        return {
+            "mode": "mock",
+            "targetUrl": order.payment_url,
+            "clickText": click_text,
+            "after": {"text": "Envia 4,999.98 COP a @coinsendaFractional123"},
+            "events": [],
+        }
+
+
+def test_checkout_rejects_fractional_breb_amount_even_with_legacy_tolerance(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    monkeypatch.setattr(app_module, "get_usdt_cop_sell_price", lambda: 3527.5)
+    client = make_client_with_coinsenda(tmp_path, FractionalMismatchCoinsendaClient())
+
+    response = client.post(
+        "/checkout",
+        json={
+            "client_id": "cli-fractional",
+            "amount_cop": 5000,
+            "max_price_slippage_cop": 1,
+            "max_retries": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checkout_status"] == "price_mismatch"
+    assert body["pay_amount_cop_numeric"] == 4999.98
+    assert body["price_slippage_cop"] == -0.02
 
 
 def test_checkout_retries_same_payment_request_after_22_seconds(monkeypatch, tmp_path) -> None:
@@ -961,6 +995,49 @@ def test_admin_order_detail_shows_exchange_rates(monkeypatch, tmp_path) -> None:
     assert "Referencia" in response.text
     assert "seticap-test" in response.text
     assert "Spread estimado" in response.text
+
+
+def test_admin_order_detail_renders_readable_event_timeline(tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    client = make_client(tmp_path)
+    order = client.post(
+        "/orders",
+        json={"client_id": "timeline-user", "amount_cop_gross": 5000},
+    ).json()
+    store = app_module.create_store(build_settings(tmp_path).database_url)
+    store.add_event(
+        order["external_id"],
+        "payment_instructions.inspected",
+        {
+            "instructions": {
+                "amount_cop_text": "4,999.98",
+                "addresses": [{"address": "@coinsenda-test"}],
+            },
+            "price_validation": {
+                "amount_cop": 5000,
+                "pay_amount_cop_numeric": 4999.98,
+                "checkout_status": "price_mismatch",
+            },
+            "inspection": {"large": "technical payload"},
+        },
+    )
+
+    response = client.get(f"/admin/orders/{order['external_id']}")
+
+    assert response.status_code == 200
+    assert "Actividad de la orden" in response.text
+    assert "Devuelto por Coinsenda" in response.text
+    assert "4,999.98 COP" in response.text
+    assert "Diferencia" in response.text
+    assert "-0.02 COP" in response.text
+    assert "Instrucciones Bre-B obtenidas" in response.text
+    assert "Solicitado: 5,000.00 COP" in response.text
+    assert "Bre-B: 4,999.98 COP" in response.text
+    assert "Llave: @coinsenda-test" in response.text
+    assert "Resultado: price_mismatch" in response.text
+    assert "Ver detalle tecnico" in response.text
+    assert "<th>Payload</th>" not in response.text
 
 
 def test_admin_order_detail_shows_htx_execution_price(tmp_path) -> None:
