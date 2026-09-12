@@ -970,6 +970,33 @@ def test_portfolio_value_uses_coinsenda_sell_price_plus_configured_markup(monkey
 
 
 
+def test_admin_order_detail_shows_customer_name_below_customer_id(tmp_path) -> None:
+    client = make_client(tmp_path)
+    account = client.post(
+        "/accounts/identify",
+        json={
+            "provider": "telegram",
+            "provider_user_id": "admin-customer-name",
+            "display_name": "Johan Prueba",
+        },
+    ).json()
+    order = client.post(
+        "/orders",
+        json={
+            "client_id": "telegram:admin-customer-name",
+            "customer_id": account["customer_id"],
+            "amount_cop_gross": 5000,
+        },
+    ).json()
+
+    response = client.get(f"/admin/orders/{order['external_id']}")
+
+    assert response.status_code == 200
+    customer_id_position = response.text.index(account["customer_id"])
+    customer_name_position = response.text.index("Johan Prueba")
+    assert customer_name_position > customer_id_position
+
+
 def test_admin_order_detail_shows_exchange_rates(monkeypatch, tmp_path) -> None:
     import chaut_api.app as app_module
 

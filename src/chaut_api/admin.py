@@ -742,7 +742,10 @@ def admin_order_detail(
         raise HTTPException(status_code=404, detail="Order not found")
     events = store.list_events(external_id)
     portfolio_link = ""
+    customer_name = "-"
     if order.customer_id:
+        account = store.get_account(order.customer_id)
+        customer_name = account.display_name if account and account.display_name else "Sin nombre registrado"
         portfolio_link = f'<a class="button" href="/admin/accounts/{escape(order.customer_id)}{_token_qs(token)}">Ver usuario</a>'
     htx_price = htx_execution_price(store, external_id)
     returned_cop = payment_instruction_amount(events)
@@ -752,7 +755,7 @@ def admin_order_detail(
     <div class="split rates-layout">
       <div class="card">
         <p class="muted">Orden</p><div class="metric"><code>{escape(order.external_id)}</code></div>
-        <p><b>Usuario:</b> <code>{escape(order.customer_id or "-")}</code></p>
+        <p><b>Usuario:</b> <code>{escape(order.customer_id or "-")}</code><br><span class="muted">{escape(customer_name)}</span></p>
         <p><b>Pago:</b> {status_pill(order.payment_status)}</p>
         <p><b>Conversion:</b> {conversion_pill(order.conversion_status)}</p>
         {portfolio_link}
