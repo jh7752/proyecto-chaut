@@ -1031,6 +1031,7 @@ def test_admin_order_detail_renders_readable_event_timeline(tmp_path) -> None:
     assert "4,999.98 COP" in response.text
     assert "Diferencia" in response.text
     assert "-0.02 COP" in response.text
+    assert '<span class="muted">PaymentRequest</span>' not in response.text
     assert "Instrucciones Bre-B obtenidas" in response.text
     assert "Solicitado: 5,000.00 COP" in response.text
     assert "Bre-B: 4,999.98 COP" in response.text

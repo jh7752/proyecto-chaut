@@ -763,7 +763,6 @@ def admin_order_detail(
           <div class="kv"><span class="muted">Solicitado</span><b>{format_cop(order.amount_cop_gross)}</b></div>
           <div class="kv"><span class="muted">Devuelto por Coinsenda</span><b>{returned_cop_text}</b></div>
           <div class="kv"><span class="muted">Diferencia</span><b>{difference_cop_text}</b></div>
-          <div class="kv"><span class="muted">PaymentRequest</span><b>{format_decimal(order.payment_amount, 6)} USDT</b></div>
         </div>
         <p><b>Creada:</b> {format_bogota_time(order.created_at)}</p>
       </div>
