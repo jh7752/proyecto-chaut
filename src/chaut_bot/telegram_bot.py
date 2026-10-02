@@ -16,6 +16,8 @@ PENDING_SETTLEMENTS: set[str] = set()
 PENDING_WITHDRAWAL_KEYS: dict[int, dict[str, Any]] = {}
 PENDING_PARTIAL_WITHDRAWALS: set[int] = set()
 NOTIFIED_WITHDRAWALS: set[str] = set()
+MOVEMENTS_PAGE_SIZE = 10
+MOVEMENTS_CACHE: dict[int, list[dict[str, Any]]] = {}
 
 
 def main() -> None:
@@ -106,6 +108,8 @@ def handle_callback(callback: dict[str, Any]) -> None:
     elif data == "saldo":
         send_balance(chat_id, user)
     elif data == "movimientos":
+        send_movements(chat_id, user, reset=True)
+    elif data == "movimientos:more":
         send_movements(chat_id, user)
     elif data.startswith("withdraw:status:"):
         check_withdrawal_status(chat_id, data.rsplit(":", 1)[1])
@@ -588,7 +592,7 @@ def notify_withdrawal_completed(chat_id: int, withdrawal: dict[str, Any]) -> Non
         buttons=[[{"text": "📊 Ver saldo", "callback_data": "saldo"}]],
     )
 
-def send_movements(chat_id: int, user: dict[str, Any]) -> None:
+def send_movements(chat_id: int, user: dict[str, Any], *, reset: bool = False) -> None:
     if not account_exists(user.get("id", chat_id)):
         send_text(chat_id, "Todavía no tengo tu cuenta por aquí. Vamos a crearla en un momento.")
         ask_name(chat_id)
@@ -598,15 +602,32 @@ def send_movements(chat_id: int, user: dict[str, Any]) -> None:
     except Exception:
         send_text(chat_id, "Aún no tienes movimientos.")
         return
-    entries = list(reversed(portfolio.get("entries", [])))[:5]
-    if not entries:
+    all_entries = list(reversed(portfolio.get("entries", [])))
+    if not all_entries:
         send_text(chat_id, "Aún no tienes movimientos.")
         return
+    if reset or chat_id not in MOVEMENTS_CACHE:
+        MOVEMENTS_CACHE[chat_id] = all_entries
+        page_entries = all_entries[:MOVEMENTS_PAGE_SIZE]
+        remaining = len(all_entries) - len(page_entries)
+    else:
+        cached = MOVEMENTS_CACHE.get(chat_id, [])
+        if len(cached) != len(all_entries):
+            MOVEMENTS_CACHE[chat_id] = all_entries
+            page_entries = all_entries[:MOVEMENTS_PAGE_SIZE]
+            remaining = len(all_entries) - len(page_entries)
+        else:
+            page_entries = cached
+            remaining = 0
     lines = ["Últimos movimientos:"]
-    for entry in entries:
+    for entry in page_entries:
         movement_date = format_movement_date(entry.get("created_at"))
         lines.append(f"- {movement_date} · {entry['gold_grams']:.12f} g oro digital 🥇 / {entry['cop_gross']:,.0f} COP")
-    send_text(chat_id, "\n".join(lines))
+    if remaining > 0:
+        lines.append(f"\n... y {remaining} movimiento{'s' if remaining != 1 else ''} más.")
+        send_text(chat_id, "\n".join(lines), buttons=[[{"text": "📜 Ver todos", "callback_data": "movimientos:more"}]])
+    else:
+        send_text(chat_id, "\n".join(lines))
 
 
 def send_order_status(chat_id: int, external_id: str) -> None:
