@@ -154,6 +154,7 @@ async function main() {
       want_to_spend: String(args.amount),
       pair_id: pair.id,
       account_from: args.from_account_id,
+      account_to: args.to_account_id,
       country: 'international'
     };
     body = unwrap(await client.swap.swap.addNewSwapPublic(payload), 'addNewSwapPublic');
