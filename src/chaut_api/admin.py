@@ -303,6 +303,17 @@ def render_admin(
     .ok {{ color:var(--ok); }} .bad {{ color:var(--bad); }} .warn {{ color:var(--warn); }} .info {{ color:var(--blue); }}
     .pill.ok {{ background:#e6f7ee; color:var(--ok); }} .pill.bad {{ background:#fce8e8; color:var(--bad); }} .pill.warn {{ background:#fef3dc; color:#94661b; }} .pill.info {{ background:#e4f0f8; color:var(--blue); }}
     [data-theme="dark"] .pill {{ background:rgba(255,255,255,.08); }}
+    .wd-status {{ display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 11px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }}
+    .wd-status:before {{ content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }}
+    .wd-status.ok {{ background:#e6f7ee; color:#1e7a4a; }}
+    .wd-status.bad {{ background:#fce8e8; color:#b42318; }}
+    .wd-status.warn {{ background:#fef3dc; color:#94661b; }}
+    [data-theme="dark"] .wd-status.ok {{ background:rgba(30,122,74,.22); color:#5ee0a0; }}
+    [data-theme="dark"] .wd-status.bad {{ background:rgba(180,35,24,.22); color:#ff8a80; }}
+    [data-theme="dark"] .wd-status.warn {{ background:rgba(148,102,27,.22); color:#f0c96a; }}
+    .wd-group {{ margin-bottom:22px; }}
+    .wd-group-title {{ display:flex; align-items:center; gap:9px; margin:0 0 10px; font-size:15px; font-weight:800; }}
+    .wd-count {{ border-radius:999px; padding:3px 9px; font-size:12px; background:rgba(212,168,83,.12); color:var(--leaf); }}
     .legacy {{ opacity:.58; }}
     .money {{ font-weight:850; letter-spacing:-.02em; white-space:nowrap; }}
     .date {{ min-width:190px; }}
@@ -790,57 +801,86 @@ def admin_order_detail(
 
 
 
+WD_PENDING_STATUSES = {"requested", "selling_xaut", "sell_review", "xaut_sold", "transferring_usdt", "swapping_cop", "paying_cop"}
+WD_FAILED_STATUSES = {"swap_failed", "payout_failed", "failed", "sell_failed", "transfer_failed", "error"}
+
+
+def _wd_status_class(status: str) -> str:
+    if status == "completed":
+        return "ok"
+    if status in WD_FAILED_STATUSES:
+        return "bad"
+    return "warn"
+
+
+def _withdrawal_card(wd, token: str | None, csrf_token: str) -> str:
+    confirm_form = ""
+    if wd.status in {"xaut_sold", "swap_failed", "paying_cop", "payout_failed"}:
+        confirm_form = (
+            f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/confirm-payment{_token_qs(token)}">'
+            f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
+            '<input name="cop_paid" type="number" step="0.01" placeholder="COP enviados manualmente" required>'
+            '<input name="cop_tx_ref" placeholder="Referencia Bre-B" required>'
+            '<input name="admin_note" placeholder="Nota opcional">'
+            '<button class="button" type="submit">Marcar retiro completado</button></form>'
+        )
+    fail_form = ""
+    if wd.status in {"requested", "selling_xaut", "sell_review"}:
+        fail_form = (
+            f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/mark-failed{_token_qs(token)}">'
+            f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
+            '<input name="reason" placeholder="Motivo del fallo verificado" required>'
+            '<input name="admin_note" placeholder="Nota: confirma que no hubo venta/movimiento externo">'
+            '<button class="button" type="submit">Liberar reserva verificada</button></form>'
+        )
+    usdt = "" if wd.usdt_received is None else f"{wd.usdt_received:.8f}"
+    price = "" if wd.xaut_sell_price is None else f"{wd.xaut_sell_price:.2f}"
+    estimated = "" if wd.estimated_value_cop is None else f"{wd.estimated_value_cop:,.0f}"
+    cop_received = "" if wd.cop_received is None else f"{wd.cop_received:,.2f}"
+    coinsenda_fee = "" if wd.coinsenda_withdraw_fee_cop is None else f"{wd.coinsenda_withdraw_fee_cop:,.2f}"
+    cop_paid = "" if wd.cop_paid is None else f"{wd.cop_paid:,.2f}"
+    coinsenda_price = "" if wd.coinsenda_sell_price is None else f"{wd.coinsenda_sell_price:,.2f}"
+    status_class = _wd_status_class(wd.status)
+    return (
+        f'<article class="card"><span class="wd-status {status_class}">{escape(wd.status)}</span>'
+        f'<h2><code>{escape(wd.withdrawal_id)}</code></h2><div class="grid">'
+        f'<div><span class="muted">Cliente</span><br><code>{escape(wd.customer_id)}</code></div>'
+        f'<div><span class="muted">Gramos</span><br>{wd.gold_grams:.12f}</div>'
+        f'<div><span class="muted">XAUT</span><br>{wd.xaut_amount:.18f}</div>'
+        f'<div><span class="muted">USDT recibido</span><br>{usdt}</div>'
+        f'<div><span class="muted">Precio venta</span><br>{price}</div>'
+        f'<div><span class="muted">Valor COP estimado</span><br>{estimated}</div>'
+        f'<div><span class="muted">COP bruto swap</span><br>{cop_received}</div>'
+        f'<div><span class="muted">Costo retiro Bre-B</span><br>{coinsenda_fee}</div>'
+        f'<div><span class="muted">COP neto enviado</span><br>{cop_paid}</div>'
+        f'<div><span class="muted">Tasa Coinsenda</span><br>{coinsenda_price}</div>'
+        f'<div><span class="muted">Bre-B Coinsenda</span><br><code>{escape(str(wd.coinsenda_withdraw_id or ""))}</code></div>'
+        f'<div><span class="muted">Llave Bre-B</span><br><code>{escape(wd.breb_key)}</code></div>'
+        f'</div>{confirm_form}{fail_form}</article>'
+    )
+
+
+def _wd_group(title: str, rows: list, token: str | None, csrf_token: str) -> str:
+    if not rows:
+        return ""
+    cards = "".join(_withdrawal_card(wd, token, csrf_token) for wd in rows)
+    return f'<section class="wd-group"><p class="wd-group-title">{escape(title)} <span class="wd-count">{len(rows)}</span></p>{cards}</section>'
+
+
 def admin_withdrawals(
     store: OrderStore, token: str | None = None, csrf_token: str = ""
 ) -> HTMLResponse:
     withdrawals = store.list_withdrawals(limit=100)
-    pending = [wd for wd in withdrawals if wd.status in {"requested", "selling_xaut", "sell_review", "xaut_sold", "transferring_usdt", "swapping_cop", "paying_cop", "swap_failed", "payout_failed"}]
-    cards = []
-    for wd in pending or withdrawals[:20]:
-        confirm_form = ""
-        if wd.status in {"xaut_sold", "swap_failed", "paying_cop", "payout_failed"}:
-            confirm_form = (
-                f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/confirm-payment{_token_qs(token)}">'
-                f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
-                '<input name="cop_paid" type="number" step="0.01" placeholder="COP enviados manualmente" required>'
-                '<input name="cop_tx_ref" placeholder="Referencia Bre-B" required>'
-                '<input name="admin_note" placeholder="Nota opcional">'
-                '<button class="button" type="submit">Marcar retiro completado</button></form>'
-            )
-        fail_form = ""
-        if wd.status in {"requested", "selling_xaut", "sell_review"}:
-            fail_form = (
-                f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/mark-failed{_token_qs(token)}">'
-                f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
-                '<input name="reason" placeholder="Motivo del fallo verificado" required>'
-                '<input name="admin_note" placeholder="Nota: confirma que no hubo venta/movimiento externo">'
-                '<button class="button" type="submit">Liberar reserva verificada</button></form>'
-            )
-        usdt = "" if wd.usdt_received is None else f"{wd.usdt_received:.8f}"
-        price = "" if wd.xaut_sell_price is None else f"{wd.xaut_sell_price:.2f}"
-        estimated = "" if wd.estimated_value_cop is None else f"{wd.estimated_value_cop:,.0f}"
-        cop_received = "" if wd.cop_received is None else f"{wd.cop_received:,.2f}"
-        coinsenda_fee = "" if wd.coinsenda_withdraw_fee_cop is None else f"{wd.coinsenda_withdraw_fee_cop:,.2f}"
-        cop_paid = "" if wd.cop_paid is None else f"{wd.cop_paid:,.2f}"
-        coinsenda_price = "" if wd.coinsenda_sell_price is None else f"{wd.coinsenda_sell_price:,.2f}"
-        cards.append(
-            f'<article class="card"><p class="eyebrow">{escape(wd.status)}</p>'
-            f'<h2><code>{escape(wd.withdrawal_id)}</code></h2><div class="grid">'
-            f'<div><span class="muted">Cliente</span><br><code>{escape(wd.customer_id)}</code></div>'
-            f'<div><span class="muted">Gramos</span><br>{wd.gold_grams:.12f}</div>'
-            f'<div><span class="muted">XAUT</span><br>{wd.xaut_amount:.18f}</div>'
-            f'<div><span class="muted">USDT recibido</span><br>{usdt}</div>'
-            f'<div><span class="muted">Precio venta</span><br>{price}</div>'
-            f'<div><span class="muted">Valor COP estimado</span><br>{estimated}</div>'
-            f'<div><span class="muted">COP bruto swap</span><br>{cop_received}</div>'
-            f'<div><span class="muted">Costo retiro Bre-B</span><br>{coinsenda_fee}</div>'
-            f'<div><span class="muted">COP neto enviado</span><br>{cop_paid}</div>'
-            f'<div><span class="muted">Tasa Coinsenda</span><br>{coinsenda_price}</div>'
-            f'<div><span class="muted">Bre-B Coinsenda</span><br><code>{escape(str(wd.coinsenda_withdraw_id or ""))}</code></div>'
-            f'<div><span class="muted">Llave Bre-B</span><br><code>{escape(wd.breb_key)}</code></div>'
-            f'</div>{confirm_form}{fail_form}</article>'
-        )
-    body = "<div class='section-head'><h2>Retiros pendientes</h2></div>" + ("".join(cards) if cards else "<p class='muted'>No hay retiros.</p>")
+    pending = [wd for wd in withdrawals if wd.status in WD_PENDING_STATUSES]
+    failed = [wd for wd in withdrawals if wd.status in WD_FAILED_STATUSES]
+    completed = [wd for wd in withdrawals if wd.status == "completed"]
+    body = (
+        "<div class='section-head'><h2>Retiros</h2></div>"
+        + _wd_group("En curso", pending, token, csrf_token)
+        + _wd_group("Fallidos", failed, token, csrf_token)
+        + _wd_group("Completados", completed[:20], token, csrf_token)
+        + ("" if (pending or failed or completed) else "<p class='muted'>No hay retiros.</p>")
+    )
     return render_admin("Retiros", body, token, csrf_token)
 
 def admin_accounts(
