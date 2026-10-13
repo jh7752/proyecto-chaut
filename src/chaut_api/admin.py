@@ -798,14 +798,14 @@ def admin_withdrawals(
     cards = []
     for wd in pending or withdrawals[:20]:
         confirm_form = ""
-        if wd.status in {"xaut_sold", "paying_cop", "payout_failed"}:
+        if wd.status in {"xaut_sold", "swap_failed", "paying_cop", "payout_failed"}:
             confirm_form = (
                 f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/confirm-payment{_token_qs(token)}">'
                 f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
-                '<input name="cop_paid" type="number" step="0.01" placeholder="COP pagado" required>'
+                '<input name="cop_paid" type="number" step="0.01" placeholder="COP enviados manualmente" required>'
                 '<input name="cop_tx_ref" placeholder="Referencia Bre-B" required>'
                 '<input name="admin_note" placeholder="Nota opcional">'
-                '<button class="button" type="submit">Confirmar pago COP</button></form>'
+                '<button class="button" type="submit">Marcar retiro completado</button></form>'
             )
         fail_form = ""
         if wd.status in {"requested", "selling_xaut", "sell_review"}:

@@ -1604,6 +1604,44 @@ def test_confirm_payment_updates_withdrawal_to_completed(monkeypatch, tmp_path) 
     assert body["completed_at"] is not None
 
 
+def test_manual_payment_can_complete_swap_failed_withdrawal(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class FailingSwapCoinsendaClient:
+        def process_withdrawal_payout(self, *args, **kwargs):
+            raise RuntimeError('manual COP payout required')
+
+    class StubHtxPrivateClient:
+        def place_market_sell(self, symbol, amount):
+            return {"status": "ok", "data": "sell-manual"}
+
+        def order(self, order_id):
+            return {"status": "ok", "data": {"id": order_id, "state": "filled", "field-amount": "0.0003", "field-cash-amount": "1.4", "field-fees": "0"}}
+
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    monkeypatch.setattr(app_module, "create_coinsenda_client", lambda *args, **kwargs: FailingSwapCoinsendaClient())
+    client = make_client(tmp_path)
+    account = _seed_withdrawable_account(client, tmp_path, "withdraw-manual")
+    withdrawal = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={"customer_id": account["customer_id"], "provider": "telegram", "provider_user_id": "withdraw-manual", "breb_key": "@breb", "portfolio_snapshot": {"xaut_net": 0.0003}},
+    ).json()
+    store = app_module.create_store(build_settings(tmp_path).database_url)
+    store.update_withdrawal_status(withdrawal["withdrawal_id"], "swap_failed", failure_reason="manual COP payout required")
+
+    response = client.post(
+        f"/withdrawals/{withdrawal['withdrawal_id']}/confirm-payment",
+        json={"cop_paid": 4500, "cop_tx_ref": "breb-manual-1", "admin_note": "Pago manual verificado"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["cop_paid"] == 4500
+    assert body["cop_tx_ref"] == "breb-manual-1"
+    assert body["completed_at"] is not None
+
+
 def test_withdrawal_rejects_more_than_available_snapshot(tmp_path) -> None:
     client = make_client(tmp_path)
     account = _seed_withdrawable_account(client, tmp_path, "withdraw-too-much")

@@ -721,7 +721,7 @@ def create_app(
         withdrawal = store.get_withdrawal(withdrawal_id)
         if withdrawal is None:
             raise HTTPException(status_code=404, detail="Withdrawal not found")
-        if withdrawal.status not in {"xaut_sold", "paying_cop", "payout_failed", "completed"}:
+        if withdrawal.status not in {"xaut_sold", "swap_failed", "paying_cop", "payout_failed", "completed"}:
             raise HTTPException(status_code=409, detail=f"Withdrawal cannot be completed from status={withdrawal.status}")
         if withdrawal.status == "completed":
             return withdrawal
