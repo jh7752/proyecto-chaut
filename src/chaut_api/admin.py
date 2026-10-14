@@ -898,7 +898,7 @@ def admin_accounts(
             f'<a class="card account-card" href="{href}">'
             f'<div class="account-head"><div><div class="avatar">{escape(initials)}</div><p class="account-name">{escape(account.display_name or account.customer_id)}</p><span class="muted"><code>{escape(account.customer_id)}</code></span></div><span class="rating-badge {rating_class}">{escape(credit.rating)}</span></div>'
             f'<div class="score-bar" style="--score:{credit.score}"><span></span></div>'
-            f'<div class="account-stats"><div class="account-stat"><span class="muted">Score</span><b>{credit.score}/100</b></div><div class="account-stat"><span class="muted">Cupo</span><b>{credit.suggested_credit_limit_cop:,.0f}</b></div><div class="account-stat"><span class="muted">COP neto</span><b>{portfolio.cop_net_contributed:,.0f}</b></div><div class="account-stat"><span class="muted">LTV max</span><b>{credit.max_ltv_percent:.0f}%</b></div></div>'
+            f'<div class="account-stats"><div class="account-stat"><span class="muted">Score</span><b>{credit.score}/100</b></div><div class="account-stat"><span class="muted">Cupo</span><b>{credit.suggested_credit_limit_cop:,.0f}</b></div><div class="account-stat"><span class="muted">Aportes netos</span><b>{portfolio.cop_net_contributed:,.0f}</b></div><div class="account-stat"><span class="muted">LTV max</span><b>{credit.max_ltv_percent:.0f}%</b></div></div>'
             "</a>"
         )
         rows.append(
@@ -909,7 +909,7 @@ def admin_accounts(
     body = (
         "<section class='account-grid'>" + "".join(cards) + "</section>"
         "<div class='section-head'><h2>Tabla completa</h2><span class='badge'>Credito y saldos</span></div>"
-        "<div class='table-wrap'><table><thead><tr><th>Usuario</th><th>Nombre</th><th>Movs</th><th>COP neto</th><th>Score</th><th>Rating</th><th>Cupo</th><th>LTV</th></tr></thead><tbody>"
+        "<div class='table-wrap'><table><thead><tr><th>Usuario</th><th>Nombre</th><th>Movs</th><th>Aportes netos</th><th>Score</th><th>Rating</th><th>Cupo</th><th>LTV</th></tr></thead><tbody>"
         + "".join(rows)
         + "</tbody></table></div>"
     )
@@ -938,7 +938,7 @@ def admin_account_detail(
     reasons = "".join(f"<li>{escape(reason)}</li>" for reason in credit.reasons)
     body = f"""
     <section class="hero"><div class="grid">
-      {metric_card("COP neto", f"{portfolio.cop_net_contributed:,.0f}")}
+      {metric_card("Aportes netos históricos", f"{portfolio.cop_net_contributed:,.0f}")}
       {metric_card("COP invertido", f"{portfolio.cop_invested:,.0f}")}
       {metric_card("COP retirado", f"{portfolio.cop_withdrawn:,.0f}")}
       {metric_card("Oro digital", f"{portfolio.gold_grams_net:.12f} g")}

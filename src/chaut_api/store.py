@@ -619,18 +619,26 @@ class SqliteOrderStore:
         expired_orders = sum(1 for row in rows if row["payment_status"] == "expired")
         unpaid_orders = sum(1 for row in rows if row["payment_status"] != "confirmed")
         identities_count = len(account.identities)
-        collateral = float(collateral_value_cop if collateral_value_cop is not None else portfolio.estimated_value_cop or portfolio.cop_invested)
+        collateral = float(collateral_value_cop if collateral_value_cop is not None else (portfolio.estimated_value_cop or 0.0))
+        paid_volume = sum(float(row["amount_cop_gross"] or 0) for row in rows if row["payment_status"] == "confirmed")
         score = 20
         reasons = ["Base inicial por cuenta creada"]
         activity_count = max(portfolio.entries_count, paid_orders)
         if activity_count:
             score += min(activity_count * 8, 24)
             reasons.append(f"{activity_count} pagos confirmados o movimientos settled")
-        paid_volume = sum(float(row["amount_cop_gross"] or 0) for row in rows if row["payment_status"] == "confirmed")
-        collateral_base = max(portfolio.cop_invested, paid_volume)
+        collateral_base = float(portfolio.estimated_value_cop or 0.0)
         if collateral_base:
             score += min(int(collateral_base // 50000) * 4, 20)
-            reasons.append(f"{collateral_base:,.0f} COP confirmados")
+            reasons.append(f"{collateral_base:,.0f} COP en oro vigente")
+        else:
+            # Sin tenencia vigente, la referencia de colateral se apoya en pagos
+            # confirmados historicos. Nunca en `cop_invested` del portfolio: eso
+            # mostraba garantia residual aun con la tenencia ya retirada.
+            collateral_base = paid_volume
+            if collateral_base:
+                score += min(int(collateral_base // 50000) * 4, 20)
+                reasons.append(f"{collateral_base:,.0f} COP confirmados historicos")
         collateral = max(collateral, collateral_base)
         if collateral > 0:
             score += 6

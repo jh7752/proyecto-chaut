@@ -1312,8 +1312,8 @@ def test_admin_uses_net_cop_after_completed_withdrawal(monkeypatch, tmp_path) ->
     detail = client.get(f"/admin/accounts/{account['customer_id']}").text
 
     assert "200 COP netos" in dashboard
-    assert "COP neto" in accounts
-    assert "COP neto" in detail
+    assert "Aportes netos" in accounts
+    assert "Aportes netos" in detail
     assert "COP retirado" in detail
 
 
