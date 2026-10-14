@@ -219,6 +219,7 @@ class WithdrawalDetailResponse(WithdrawalResponse):
     coinsenda_withdraw_id: str | None = None
     coinsenda_withdraw_fee_cop: float | None = None
     coinsenda_withdraw_net_cop: float | None = None
+    coinsenda_withdraw_gross_cop: float | None = None
     cop_paid: float | None = None
     cop_tx_ref: str | None = None
     admin_note: str | None = None
@@ -233,6 +234,9 @@ class WithdrawalPaymentConfirmationRequest(BaseModel):
     cop_paid: NonNegativeFloat
     cop_tx_ref: str = Field(min_length=1, max_length=120)
     admin_note: str | None = None
+    # Fee Coinsenda Bre-B y bruto; si no se envian, se infieren: bruto = neto + fee.
+    coinsenda_withdraw_fee_cop: NonNegativeFloat | None = None
+    coinsenda_withdraw_gross_cop: NonNegativeFloat | None = None
 
 
 class WithdrawalMarkFailedRequest(BaseModel):

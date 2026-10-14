@@ -819,7 +819,9 @@ def _withdrawal_card(wd, token: str | None, csrf_token: str) -> str:
         confirm_form = (
             f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/confirm-payment{_token_qs(token)}">'
             f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
-            '<input name="cop_paid" type="number" step="0.01" placeholder="COP enviados manualmente" required>'
+            '<input name="cop_paid" type="number" step="0.01" placeholder="COP neto enviados (al cliente)" required>'
+            '<input name="coinsenda_withdraw_fee_cop" type="number" step="0.01" placeholder="Fee Coinsenda (ej 3000)">'
+            '<input name="coinsenda_withdraw_gross_cop" type="number" step="0.01" placeholder="COP bruto retiro (opcional; neto+fee)">'
             '<input name="cop_tx_ref" placeholder="Referencia Bre-B" required>'
             '<input name="admin_note" placeholder="Nota opcional">'
             '<button class="button" type="submit">Marcar retiro completado</button></form>'
@@ -940,8 +942,8 @@ def admin_account_detail(
     <section class="hero"><div class="grid">
       {metric_card("Aportes netos históricos", f"{portfolio.cop_net_contributed:,.0f}")}
       {metric_card("COP invertido", f"{portfolio.cop_invested:,.0f}")}
-      {metric_card("COP retirado", f"{portfolio.cop_withdrawn:,.0f}")}
-      {metric_card("Oro digital", f"{portfolio.gold_grams_net:.12f} g")}
+      {metric_card("COP retirado (bruto)", f"{portfolio.cop_withdrawn:,.0f}")}
+      {metric_card("Saldo actual (oro)", f"{portfolio.gold_grams_net:.12f} g")}
     </div></section>
     <section class="profile-tabs">
       <div class="tab-nav"><a href="#perfil">Perfil</a><a href="#credito">Credito</a><a href="#ledger">Ledger</a></div>

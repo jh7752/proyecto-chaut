@@ -1304,14 +1304,15 @@ def test_admin_uses_net_cop_after_completed_withdrawal(monkeypatch, tmp_path) ->
 
     portfolio = client.get(f"/accounts/{account['customer_id']}/portfolio").json()
     assert portfolio["cop_invested"] == 5000.0
-    assert portfolio["cop_withdrawn"] == 4800.0
-    assert portfolio["cop_net_contributed"] == 200.0
+    # cop_withdrawn = bruto retirado (neto 4800 + fee 100 del mock Bre-B).
+    assert portfolio["cop_withdrawn"] == 4900.0
+    assert portfolio["cop_net_contributed"] == 100.0
 
     dashboard = client.get("/admin").text
     accounts = client.get("/admin/accounts").text
     detail = client.get(f"/admin/accounts/{account['customer_id']}").text
 
-    assert "200 COP netos" in dashboard
+    assert "100 COP netos" in dashboard
     assert "Aportes netos" in accounts
     assert "Aportes netos" in detail
     assert "COP retirado" in detail

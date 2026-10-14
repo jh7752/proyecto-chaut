@@ -223,6 +223,7 @@ class SqliteOrderStore:
             "coinsenda_withdraw_id": "ALTER TABLE withdrawals ADD COLUMN coinsenda_withdraw_id TEXT",
             "coinsenda_withdraw_fee_cop": "ALTER TABLE withdrawals ADD COLUMN coinsenda_withdraw_fee_cop REAL",
             "coinsenda_withdraw_net_cop": "ALTER TABLE withdrawals ADD COLUMN coinsenda_withdraw_net_cop REAL",
+            "coinsenda_withdraw_gross_cop": "ALTER TABLE withdrawals ADD COLUMN coinsenda_withdraw_gross_cop REAL",
         }
         for column, statement in migrations.items():
             if column not in existing:
@@ -570,7 +571,7 @@ class SqliteOrderStore:
             ).fetchall()
             paid_withdrawal_rows = conn.execute(
                 """
-                SELECT withdrawal_id, cop_paid
+                SELECT withdrawal_id, cop_paid, coinsenda_withdraw_fee_cop, coinsenda_withdraw_gross_cop
                 FROM withdrawals
                 WHERE customer_id = ? AND cop_paid IS NOT NULL
                 """,
@@ -581,7 +582,15 @@ class SqliteOrderStore:
         withdrawal_entries = [entry for entry in entries if entry.entry_type == "xaut_withdrawal"]
         cop_invested = round(sum(entry.cop_gross for entry in purchase_entries), 2)
         purchase_xaut = sum(entry.amount for entry in purchase_entries)
-        paid_withdrawals = {str(row["withdrawal_id"]): float(row["cop_paid"] or 0) for row in paid_withdrawal_rows}
+        # cop_withdrawn = BRUTO retirado via Bre-B (lo que salio de Coinsenda),
+        # incluyendo el fee. Prioridad: gross registrado > neto + fee > neto.
+        paid_withdrawals = {}
+        for row in paid_withdrawal_rows:
+            gross = row["coinsenda_withdraw_gross_cop"]
+            if gross is not None and float(gross) > 0:
+                paid_withdrawals[str(row["withdrawal_id"])] = float(gross)
+            else:
+                paid_withdrawals[str(row["withdrawal_id"])] = float(row["cop_paid"] or 0) + float(row["coinsenda_withdraw_fee_cop"] or 0)
         cop_withdrawn = 0.0
         for entry in withdrawal_entries:
             paid_amount = paid_withdrawals.get(entry.external_id)
@@ -791,7 +800,7 @@ class SqliteOrderStore:
         allowed = {
             "htx_order_id", "usdt_received", "xaut_sell_price", "coinsenda_self_transfer_id",
             "coinsenda_swap_id", "cop_received", "coinsenda_sell_price", "coinsenda_withdraw_id",
-            "coinsenda_withdraw_fee_cop", "coinsenda_withdraw_net_cop", "cop_paid", "cop_tx_ref",
+            "coinsenda_withdraw_fee_cop", "coinsenda_withdraw_net_cop", "coinsenda_withdraw_gross_cop", "cop_paid", "cop_tx_ref",
             "admin_note", "failure_reason", "ledger_entry_id",
             "processed_at", "completed_at",
         }

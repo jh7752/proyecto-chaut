@@ -441,10 +441,10 @@ def create_app(
         return admin_withdrawals(store, token, csrf_token)
 
     @app.post("/admin/withdrawals/{withdrawal_id}/confirm-payment")
-    def admin_confirm_withdrawal_payment(withdrawal_id: str, request: Request, csrf_token: str = Form(""), cop_paid: float = Form(...), cop_tx_ref: str = Form(...), admin_note: str | None = Form(None)):
+    def admin_confirm_withdrawal_payment(withdrawal_id: str, request: Request, csrf_token: str = Form(""), cop_paid: float = Form(...), cop_tx_ref: str = Form(...), admin_note: str | None = Form(None), coinsenda_withdraw_fee_cop: float | None = Form(None), coinsenda_withdraw_gross_cop: float | None = Form(None)):
         token = require_admin_access(request)
         require_admin_csrf(request, settings.admin_session_secret, csrf_token)
-        confirm_withdrawal_payment(withdrawal_id, WithdrawalPaymentConfirmationRequest(cop_paid=cop_paid, cop_tx_ref=cop_tx_ref, admin_note=admin_note))
+        confirm_withdrawal_payment(withdrawal_id, WithdrawalPaymentConfirmationRequest(cop_paid=cop_paid, cop_tx_ref=cop_tx_ref, admin_note=admin_note, coinsenda_withdraw_fee_cop=coinsenda_withdraw_fee_cop, coinsenda_withdraw_gross_cop=coinsenda_withdraw_gross_cop))
         suffix = f"?token={token}" if token else ""
         return RedirectResponse(f"/admin/withdrawals{suffix}", status_code=303)
 
@@ -673,6 +673,7 @@ def create_app(
                 coinsenda_withdraw_id=withdraw_id,
                 coinsenda_withdraw_fee_cop=breb_fee,
                 coinsenda_withdraw_net_cop=breb_net,
+                coinsenda_withdraw_gross_cop=cop_received,
                 cop_paid=breb_net,
                 cop_tx_ref=withdraw_id,
                 completed_at=datetime.now(UTC).isoformat(),
@@ -727,12 +728,18 @@ def create_app(
             return withdrawal
         paying = store.update_withdrawal_status(withdrawal_id, "paying_cop")
         store.add_event(withdrawal_id, "withdrawal.paying_cop", paying.model_dump() if paying else {})
+        fee = payload.coinsenda_withdraw_fee_cop
+        gross = payload.coinsenda_withdraw_gross_cop
+        if gross is None and fee is not None:
+            gross = float(payload.cop_paid) + float(fee)
         completed = store.update_withdrawal_status(
             withdrawal_id,
             "completed",
             cop_paid=float(payload.cop_paid),
             cop_tx_ref=payload.cop_tx_ref,
             admin_note=payload.admin_note,
+            coinsenda_withdraw_fee_cop=fee,
+            coinsenda_withdraw_gross_cop=gross,
             completed_at=datetime.now(UTC).isoformat(),
         )
         if completed is None:
