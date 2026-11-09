@@ -289,7 +289,7 @@ def _create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> Non
         print(f"checkout error for chat {chat_id}: {exc}", flush=True)
         send_text(
             chat_id,
-            "La generación de la llave Bre-B tardó más de lo esperado. No vuelvas a solicitarla todavía; intenta de nuevo en un minuto.",
+            "Coinsenda no pudo crear la referencia Bre-B. No se generó una llave ni debes hacer ningún pago. Intenta nuevamente más tarde.",
             buttons=[[{"text": "Intentar otra vez", "callback_data": f"ahorros:{amount_cop}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]],
         )
     finally:

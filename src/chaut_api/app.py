@@ -940,12 +940,34 @@ def create_app(
             )
 
             payment_amount = calculate_usdt_from_cop(order.amount_cop_gross, sell_price)
-            payment_request = coinsenda_client.create_payment_request(
-                order,
-                payload.expiration_minutes,
-                "usdt",
-                payment_amount,
-            )
+            try:
+                payment_request = coinsenda_client.create_payment_request(
+                    order,
+                    payload.expiration_minutes,
+                    "usdt",
+                    payment_amount,
+                )
+            except Exception as exc:
+                failed_order = store.update_payment_status(order.external_id, "failed")
+                store.add_event(
+                    order.external_id,
+                    "payment_request.failed",
+                    {
+                        "checkout_attempt": attempt_number,
+                        "payment_currency": "usdt",
+                        "payment_amount": payment_amount,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:1000],
+                    },
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "code": "coinsenda_payment_request_failed",
+                        "external_id": order.external_id,
+                        "payment_status": failed_order.payment_status if failed_order else "failed",
+                    },
+                ) from exc
             updated_order = store.update_payment_request(
                 external_id=order.external_id,
                 payment_request_id=payment_request.payment_request_id,

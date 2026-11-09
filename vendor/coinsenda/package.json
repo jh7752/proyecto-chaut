@@ -4,7 +4,7 @@
   "description": "//SpicyMeet - Coinsenda - Examples",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test test/*.test.js",
     "generate:keypair": "node scripts/generate-keypair.js",
     "auth:jwt": "node scripts/auth-jwt-from-private-key.js",
     "cobro": "node scripts/cobro.js",

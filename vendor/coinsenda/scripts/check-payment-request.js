@@ -5,7 +5,7 @@ require('./load-env');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { CoinsendaClientV2, isHttpSuccess } = require('@coinsenda/sdk');
+const { getPaymentRequests } = require('./coinsenda-deposit-http');
 
 function parseArgs(argv) {
   const args = {
@@ -49,18 +49,6 @@ function runAuthScript() {
   }).trim();
 }
 
-async function getPaymentRequests(client, filterObj) {
-  const result = await client.deposit.user.__get__paymentRequests(JSON.stringify(filterObj));
-  if (!isHttpSuccess(result.status)) {
-    throw new Error(`paymentRequests GET fallo (${result.status}): ${JSON.stringify(result.data)}`);
-  }
-
-  const raw = result.data;
-  if (Array.isArray(raw)) return raw;
-  if (raw && Array.isArray(raw.data)) return raw.data;
-  return [];
-}
-
 function appendLedger(filePath, event) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.appendFileSync(filePath, `${JSON.stringify(event)}\n`);
@@ -92,13 +80,8 @@ async function main() {
   if (!jwt) throw new Error('El script de auth no devolvio JWT.');
 
   const userId = userIdFromJwt(jwt);
-  const client = new CoinsendaClientV2({ environment: process.env.COINSENDA_ENV || 'prod' });
-  client.setJwt(jwt);
-  client.setClientId('');
-  client.setUserId(userId);
-
   const where = args.id ? { id: args.id } : { external_id: args.external_id };
-  const rows = await getPaymentRequests(client, { where });
+  const rows = await getPaymentRequests(jwt, userId, { where });
   const summarized = rows.map(summarize);
   const first = summarized[0] || null;
   const eventType = rows.length === 0 ? 'payment_request_not_found' : classifyState(first.state);

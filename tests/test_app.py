@@ -322,6 +322,28 @@ def test_checkout_rejects_amount_below_5000_cop(tmp_path) -> None:
     assert response.status_code == 422
 
 
+def test_checkout_records_payment_request_failure(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class FailingCoinsendaClient:
+        def create_payment_request(self, *_args, **_kwargs):
+            raise RuntimeError("coinsenda schema rejected payload")
+
+    monkeypatch.setattr(app_module, "get_usdt_cop_sell_price", lambda: 3527.5)
+    client = make_client_with_coinsenda(tmp_path, FailingCoinsendaClient())
+
+    response = client.post("/checkout", json={"client_id": "cli-test", "amount_cop": 5000})
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["code"] == "coinsenda_payment_request_failed"
+    order = client.get(f"/orders/{detail['external_id']}").json()
+    assert order["payment_status"] == "failed"
+    events = client.get(f"/orders/{detail['external_id']}/events").json()
+    assert [event["event_type"] for event in events] == ["order.created", "payment_request.failed"]
+    assert events[-1]["payload"]["error_type"] == "RuntimeError"
+
+
 class SlippageCoinsendaClient(AcceptedCoinsendaClient):
     def __init__(self) -> None:
         super().__init__()

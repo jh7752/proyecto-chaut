@@ -5,7 +5,7 @@ require('./load-env');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { CoinsendaClientV2, isHttpSuccess } = require('@coinsenda/sdk');
+const { createPaymentRequest, getPaymentRequests } = require('./coinsenda-deposit-http');
 
 function parseArgs(argv) {
   const args = {
@@ -62,18 +62,6 @@ function runAuthScript() {
   }).trim();
 }
 
-async function getPaymentRequests(client, filterObj) {
-  const result = await client.deposit.user.__get__paymentRequests(JSON.stringify(filterObj));
-  if (!isHttpSuccess(result.status)) {
-    throw new Error(`paymentRequests GET fallo (${result.status}): ${JSON.stringify(result.data)}`);
-  }
-
-  const raw = result.data;
-  if (Array.isArray(raw)) return raw;
-  if (raw && Array.isArray(raw.data)) return raw.data;
-  return [];
-}
-
 function appendLedger(filePath, event) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.appendFileSync(filePath, `${JSON.stringify(event)}\n`);
@@ -96,11 +84,6 @@ async function main() {
   if (!jwt) throw new Error('El script de auth no devolvio JWT.');
 
   const userId = userIdFromJwt(jwt);
-  const client = new CoinsendaClientV2({ environment: process.env.COINSENDA_ENV || 'prod' });
-  client.setJwt(jwt);
-  client.setClientId('');
-  client.setUserId(userId);
-
   const payload = {
     userId,
     amount: String(args.amount),
@@ -109,25 +92,35 @@ async function main() {
     external_id: args.external_id
   };
 
-  const created = await client.deposit.paymentRequest.addNewPaymentRequest(payload);
-  if (!isHttpSuccess(created.status)) {
-    throw new Error(`addNewPaymentRequest fallo (${created.status}): ${JSON.stringify(created.data)}`);
+  let existing = [];
+  try {
+    existing = await getPaymentRequests(jwt, userId, { where: { external_id: args.external_id } });
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'payment_request.lookup_failed', message: String(err?.message || err) }));
   }
-
-  const body = created.data?.data || created.data;
+  const reusable = existing.find((row) => !['expired', 'cancelled', 'canceled', 'failed', 'rejected'].includes(String(row?.state || '').toLowerCase()));
+  const body = reusable || await createPaymentRequest(jwt, payload);
   const paymentRequestId = body?.id;
   if (!paymentRequestId) {
     throw new Error(`Respuesta sin id de PaymentRequest: ${JSON.stringify(body)}`);
   }
 
-  const byId = await getPaymentRequests(client, { where: { id: paymentRequestId } });
-  const byExternal = await getPaymentRequests(client, { where: { external_id: args.external_id } });
+  let byId = reusable ? [reusable] : [];
+  let byExternal = existing;
+  try {
+    [byId, byExternal] = await Promise.all([
+      getPaymentRequests(jwt, userId, { where: { id: paymentRequestId } }),
+      getPaymentRequests(jwt, userId, { where: { external_id: args.external_id } })
+    ]);
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'payment_request.verification_failed', payment_request_id: paymentRequestId, message: String(err?.message || err) }));
+  }
   const appOrigin = (process.env.COINSENDA_APP_ORIGIN || 'https://app.coinsenda.com').replace(/\/$/, '');
   const url = `${appOrigin}/paymentRequest?paymentRequestId=${encodeURIComponent(String(paymentRequestId))}`;
   const payUrl = `${appOrigin}/paymentRequest/${encodeURIComponent(String(paymentRequestId))}`;
 
   const record = {
-    event_type: 'payment_request_created',
+    event_type: reusable ? 'payment_request_reused' : 'payment_request_created',
     source: 'coinsenda_api',
     created_at: new Date().toISOString(),
     external_id: args.external_id,
@@ -136,7 +129,7 @@ async function main() {
     amount: String(args.amount),
     currency: payload.currency,
     expiration_minutes: args.expiration,
-    status: summarize(byId[0])?.state || 'created',
+    status: summarize(byId[0])?.state || body?.state || 'created',
     url,
     pay_url: payUrl,
     verification: {
