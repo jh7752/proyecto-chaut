@@ -344,6 +344,37 @@ def test_checkout_records_payment_request_failure(monkeypatch, tmp_path) -> None
     assert events[-1]["payload"]["error_type"] == "RuntimeError"
 
 
+class BufferedDepositCoinsendaClient(AcceptedCoinsendaClient):
+    def get_usdt_cop_sell_price(self):
+        return 3116.56
+
+    def get_usdt_cop_deposit_price(self):
+        return 3299.5 * 1.01
+
+    def inspect_payment_request(self, order, click_text: str):
+        assert order.payment_amount == 3.000755
+        return {
+            "mode": "mock",
+            "targetUrl": order.payment_url,
+            "clickText": click_text,
+            "after": {"text": "Envia 10,000 COP a @chautBuffered123"},
+            "events": [],
+        }
+
+
+def test_checkout_uses_coinsenda_buy_price_and_buffer_for_exact_breb_amount(tmp_path) -> None:
+    client = make_client_with_coinsenda(tmp_path, BufferedDepositCoinsendaClient())
+
+    response = client.post("/checkout", json={"client_id": "cli-test", "amount_cop": 10000, "max_retries": 0})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checkout_status"] == "ready"
+    assert body["payment_amount"] == 3.000755
+    assert body["sell_price_cop_per_usdt"] == 3116.56
+    assert body["pay_amount_cop_numeric"] == 10000
+
+
 class SlippageCoinsendaClient(AcceptedCoinsendaClient):
     def __init__(self) -> None:
         super().__init__()

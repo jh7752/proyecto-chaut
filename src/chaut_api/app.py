@@ -921,6 +921,8 @@ def create_app(
 
         for attempt_number in range(1, max_attempts + 1):
             sell_price = getattr(coinsenda_client, "get_usdt_cop_sell_price", get_usdt_cop_sell_price)()
+            deposit_price_getter = getattr(coinsenda_client, "get_usdt_cop_deposit_price", None)
+            deposit_price = float(deposit_price_getter()) if callable(deposit_price_getter) else sell_price
             spread = build_spread_payload(payload.amount_cop, sell_price, get_checkout_reference_rate())
             order_payload = CreateOrderRequest(
                 client_id=payload.client_id,
@@ -939,7 +941,7 @@ def create_app(
                 {**order.model_dump(), "checkout_attempt": attempt_number},
             )
 
-            payment_amount = calculate_usdt_from_cop(order.amount_cop_gross, sell_price)
+            payment_amount = calculate_usdt_from_cop(order.amount_cop_gross, deposit_price)
             try:
                 payment_request = coinsenda_client.create_payment_request(
                     order,
@@ -956,6 +958,7 @@ def create_app(
                         "checkout_attempt": attempt_number,
                         "payment_currency": "usdt",
                         "payment_amount": payment_amount,
+                        "deposit_price_cop_per_usdt": deposit_price,
                         "error_type": type(exc).__name__,
                         "error": str(exc)[:1000],
                     },
@@ -1000,6 +1003,7 @@ def create_app(
                     "payment_status": payment_request.status,
                     "payment_currency": "usdt",
                     "payment_amount": payment_amount,
+                    "deposit_price_cop_per_usdt": deposit_price,
                     "sell_price_cop_per_usdt": sell_price,
                     "reference_rate_cop_per_usdt": spread["reference_rate_cop_per_usdt"],
                     "reference_rate_source": spread["reference_rate_source"],

@@ -7,6 +7,16 @@ import pytest
 from chaut_api import coinsenda
 
 
+def test_deposit_price_uses_buy_price_plus_coinsenda_buffer() -> None:
+    pair = {"buy_price": "3299.5", "sell_price": "3116.56"}
+
+    deposit_price = coinsenda.get_deposit_price_from_pair(pair)
+    payment_amount = coinsenda.calculate_usdt_from_cop(10000, deposit_price)
+
+    assert deposit_price == 3332.495
+    assert payment_amount == 3.000755
+
+
 def test_get_usdt_cop_pair_uses_clean_post_payload(monkeypatch) -> None:
     captured = {}
 

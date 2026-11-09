@@ -9,6 +9,9 @@ from pathlib import Path
 from .models import OrderResponse
 
 
+COINSENDA_DEPOSIT_BUFFER_PERCENT = Decimal("1")
+
+
 @dataclass(frozen=True)
 class PaymentRequestResult:
     payment_request_id: str
@@ -150,6 +153,9 @@ class ScriptCoinsendaClient(CoinsendaClient):
     def get_usdt_cop_sell_price(self) -> float:
         return float(self.get_usdt_cop_pair()["sell_price"])
 
+    def get_usdt_cop_deposit_price(self) -> float:
+        return get_deposit_price_from_pair(self.get_usdt_cop_pair())
+
     def _run_json(self, script_name: str, *args: str, allowed_return_codes: tuple[int, ...] = (0, 2)) -> dict:
         script = self._runtime_dir / "scripts" / script_name
         env = os.environ.copy()
@@ -179,6 +185,12 @@ def create_coinsenda_client(mode: str, app_origin: str, runtime_dir: str) -> Coi
     if mode == "script":
         return ScriptCoinsendaClient(runtime_dir=runtime_dir)
     return DisabledCoinsendaClient()
+
+
+def get_deposit_price_from_pair(pair: dict) -> float:
+    buy_price = Decimal(str(pair["buy_price"]))
+    buffer_multiplier = Decimal("1") + (COINSENDA_DEPOSIT_BUFFER_PERCENT / Decimal("100"))
+    return float(buy_price * buffer_multiplier)
 
 
 def calculate_usdt_from_cop(target_cop: int | float, sell_price_cop_per_usdt: float) -> float:
@@ -221,3 +233,7 @@ def get_usdt_cop_pair() -> dict:
 
 def get_usdt_cop_sell_price() -> float:
     return float(get_usdt_cop_pair()["sell_price"])
+
+
+def get_usdt_cop_deposit_price() -> float:
+    return get_deposit_price_from_pair(get_usdt_cop_pair())
