@@ -196,31 +196,23 @@ def _format_amount(payment_amount: float, currency: str) -> str:
 
 
 def get_usdt_cop_pair() -> dict:
-    script = Path(__file__).resolve().parents[2] / "vendor" / "coinsenda" / "scripts" / "get-usdt-cop-pair.js"
-    if script.exists():
-        proc = subprocess.run(
-            ["node", str(script)],
-            cwd=script.parents[1],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if proc.returncode == 0:
-            return json.loads(proc.stdout)
-
     req = urllib.request.Request(
         "https://swap.coinsenda.com/api/pairs/get-all-pairs-for-public",
+        data=json.dumps({"data": {}}).encode(),
+        method="POST",
         headers={
+            "Content-Type": "application/json",
             "Accept": "application/json",
             "Origin": "https://app.coinsenda.com",
             "Referer": "https://app.coinsenda.com/",
-            "User-Agent": "Mozilla/5.0",
+            "User-Agent": "Chaut Payments/1.0",
         },
     )
     with urllib.request.urlopen(req, timeout=20) as response:
         payload = json.loads(response.read().decode())
     pairs = payload.get("data", payload)
+    if not isinstance(pairs, list):
+        raise RuntimeError("Coinsenda pairs response is not an array")
     for pair in pairs:
         if pair.get("primary_currency") == "usdt" and pair.get("secondary_currency") == "cop":
             return pair
