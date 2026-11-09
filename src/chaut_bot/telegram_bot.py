@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -12,6 +13,8 @@ MIN_COP = 5000
 PAYMENT_EXPIRATION_MINUTES = 45
 PENDING_NAMES: dict[int, bool] = {}
 PENDING_CUSTOM_AMOUNTS: set[int] = set()
+PENDING_CHECKOUTS: set[int] = set()
+PENDING_CHECKOUTS_LOCK = threading.Lock()
 PENDING_SETTLEMENTS: set[str] = set()
 PENDING_WITHDRAWAL_KEYS: dict[int, dict[str, Any]] = {}
 PENDING_PARTIAL_WITHDRAWALS: set[int] = set()
@@ -244,34 +247,54 @@ def create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None
     if amount_cop < MIN_COP:
         send_text(chat_id, "El mínimo para ahorrar en oro digital 🥇 es 5.000 COP.")
         return
+    with PENDING_CHECKOUTS_LOCK:
+        if chat_id in PENDING_CHECKOUTS:
+            send_text(chat_id, "Ya estoy generando tu llave Bre-B. No necesitas pedir otra; te la enviaré apenas esté lista.")
+            return
+        PENDING_CHECKOUTS.add(chat_id)
     send_text(chat_id, "Dame un momento, estoy generando tu referencia Bre-B.")
-    account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
-    payload = {
-        "client_id": f"telegram:{user.get('id', chat_id)}",
-        "identity": identity(chat_id, user, account.get("display_name")),
-        "amount_cop": amount_cop,
-        "method": "Bre-B",
-        "expiration_minutes": PAYMENT_EXPIRATION_MINUTES,
-    }
-    checkout = api("POST", "/checkout", payload)
-    external_id = checkout["external_id"]
-    if checkout.get("checkout_status") != "ready" or not checkout.get("pay_to") or not checkout.get("pay_amount_cop"):
+    threading.Thread(target=_create_checkout, args=(chat_id, dict(user), amount_cop), daemon=True).start()
+
+
+def _create_checkout(chat_id: int, user: dict[str, Any], amount_cop: int) -> None:
+    try:
+        account = api("GET", f"/accounts/by-identity/telegram/{user.get('id', chat_id)}")
+        payload = {
+            "client_id": f"telegram:{user.get('id', chat_id)}",
+            "identity": identity(chat_id, user, account.get("display_name")),
+            "amount_cop": amount_cop,
+            "method": "Bre-B",
+            "expiration_minutes": PAYMENT_EXPIRATION_MINUTES,
+        }
+        checkout = api("POST", "/checkout", payload)
+        external_id = checkout["external_id"]
+        if checkout.get("checkout_status") != "ready" or not checkout.get("pay_to") or not checkout.get("pay_amount_cop"):
+            send_text(
+                chat_id,
+                "No pude generar una llave Bre-B confiable en este momento. Intenta de nuevo en unos segundos, por favor.",
+                buttons=[[{"text": "Intentar otra vez", "callback_data": f"ahorros:{amount_cop}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]],
+            )
+            return
+        text = (
+            "Listo. Haz la transferencia exacta por Bre-B:\n\n"
+            "Monto: "
+            f"{checkout.get('pay_amount_cop')} COP\n"
+            f"Llave: {checkout.get('pay_to')}\n\n"
+            f"Orden: {external_id}\n\n"
+            f"Esta referencia vence en {checkout.get('expires_in_minutes') or PAYMENT_EXPIRATION_MINUTES} minutos.\n\n"
+            "Cuando termines el pago, toca el botón para validar la transferencia y acreditar tu oro digital 🥇."
+        )
+        send_text(chat_id, text, buttons=[[{"text": "✅ Ya hice el pago", "callback_data": f"paid:{external_id}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]])
+    except Exception as exc:
+        print(f"checkout error for chat {chat_id}: {exc}", flush=True)
         send_text(
             chat_id,
-            "No pude generar una llave Bre-B confiable en este momento. Intenta de nuevo en unos segundos, por favor.",
+            "La generación de la llave Bre-B tardó más de lo esperado. No vuelvas a solicitarla todavía; intenta de nuevo en un minuto.",
             buttons=[[{"text": "Intentar otra vez", "callback_data": f"ahorros:{amount_cop}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]],
         )
-        return
-    text = (
-        "Listo. Haz la transferencia exacta por Bre-B:\n\n"
-        "Monto: "
-        f"{checkout.get('pay_amount_cop')} COP\n"
-        f"Llave: {checkout.get('pay_to')}\n\n"
-        f"Orden: {external_id}\n\n"
-        f"Esta referencia vence en {checkout.get('expires_in_minutes') or PAYMENT_EXPIRATION_MINUTES} minutos.\n\n"
-        "Cuando termines el pago, toca el botón para validar la transferencia y acreditar tu oro digital 🥇."
-    )
-    send_text(chat_id, text, buttons=[[{"text": "✅ Ya hice el pago", "callback_data": f"paid:{external_id}"}], [{"text": "📊 Ver saldo", "callback_data": "saldo"}]])
+    finally:
+        with PENDING_CHECKOUTS_LOCK:
+            PENDING_CHECKOUTS.discard(chat_id)
 
 
 def settle_order(chat_id: int, external_id: str) -> None:
