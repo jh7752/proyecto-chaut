@@ -1,29 +1,27 @@
 import json
-import re
-import subprocess
 import time
+import urllib.request
+from datetime import date
 from pathlib import Path
 
-CACHE_PATH = Path("/tmp/chaut-seticap-trm-cache.json")
-CONTAINER_SETICAP_DIR = Path("/app/vendor/seticap-trm")
-REPO_SETICAP_DIR = Path(__file__).resolve().parents[2] / "vendor" / "seticap-trm"
-SETICAP_DIR = CONTAINER_SETICAP_DIR if CONTAINER_SETICAP_DIR.exists() else REPO_SETICAP_DIR
+CACHE_PATH = Path("/tmp/chaut-trm-cache.json")
 CACHE_TTL_SECONDS = 1800
+DATOS_GOV_URL = "https://www.datos.gov.co/resource/32sa-8pi3.json?$limit=5&$order=vigenciadesde%20DESC"
 
 
 def get_seticap_trm(ttl_seconds: int = CACHE_TTL_SECONDS) -> dict:
     cached = _read_cache()
     now = time.time()
     if cached and now - float(cached.get("fetched_at_epoch", 0)) < ttl_seconds:
-        return {**cached, "source": "seticap-cache"}
+        return {**cached, "source": "datos-gov-cache"}
 
     try:
         return refresh_seticap_trm_cache()
     except Exception:
         pass
     if cached:
-        return {**cached, "source": "seticap-cache-stale"}
-    raise RuntimeError("Could not fetch Seticap close rate")
+        return {**cached, "source": "datos-gov-cache-stale"}
+    raise RuntimeError("Could not fetch official TRM from datos.gov.co")
 
 
 def get_cached_seticap_trm(ttl_seconds: int = CACHE_TTL_SECONDS) -> dict | None:
@@ -31,7 +29,7 @@ def get_cached_seticap_trm(ttl_seconds: int = CACHE_TTL_SECONDS) -> dict | None:
     if not cached:
         return None
     now = time.time()
-    source = "seticap-cache" if now - float(cached.get("fetched_at_epoch", 0)) < ttl_seconds else "seticap-cache-stale"
+    source = "datos-gov-cache" if now - float(cached.get("fetched_at_epoch", 0)) < ttl_seconds else "datos-gov-cache-stale"
     return {**cached, "source": source}
 
 
@@ -43,17 +41,36 @@ def refresh_seticap_trm_cache() -> dict:
 
 
 def _fetch_seticap_trm() -> dict:
-    result = subprocess.run(
-        ["node", "trm.js"],
-        cwd=SETICAP_DIR,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=20,
+    today = date.today().isoformat()
+    req = urllib.request.Request(
+        DATOS_GOV_URL,
+        headers={"Accept": "application/json", "User-Agent": "Chaut TRM/1.0"},
     )
-    payload = _parse_seticap_output(result.stdout)
-    payload["source"] = "seticap"
-    return payload
+    with urllib.request.urlopen(req, timeout=15) as response:
+        rows = json.loads(response.read().decode())
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError("datos.gov.co returned no TRM rows")
+    selected = None
+    for row in rows:
+        vigencia = str(row.get("vigenciadesde") or "")[:10]
+        if vigencia and vigencia <= today:
+            selected = row
+            break
+    if selected is None:
+        selected = rows[0]
+    try:
+        value = float(selected["valor"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"datos.gov.co TRM row invalid: {selected}") from exc
+    vigencia_desde = str(selected.get("vigenciadesde") or "")[:10]
+    vigencia_hasta = str(selected.get("vigenciahasta") or "")[:10]
+    return {
+        "reference_rate": value,
+        "reference_rate_source": "datos-gov-trm",
+        "reference_rate_date": vigencia_desde or None,
+        "reference_rate_valid_until": vigencia_hasta or None,
+        "source": "datos-gov",
+    }
 
 
 def _read_cache() -> dict | None:
@@ -61,16 +78,3 @@ def _read_cache() -> dict | None:
         return json.loads(CACHE_PATH.read_text())
     except Exception:
         return None
-
-
-def _parse_seticap_output(output: str) -> dict:
-    close_match = re.search(r"Cierre:\s*\$\s*([0-9,.]+)", output)
-    date_match = re.search(r"Fecha:\s*([^\n]+)", output)
-    if not close_match:
-        raise ValueError("Could not parse Seticap close rate")
-    value = float(close_match.group(1).replace(",", ""))
-    return {
-        "reference_rate": value,
-        "reference_rate_source": "seticap-close",
-        "reference_rate_date": date_match.group(1).strip() if date_match else None,
-    }

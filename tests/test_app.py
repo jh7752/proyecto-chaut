@@ -1,4 +1,5 @@
 import concurrent.futures
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1784,12 +1785,12 @@ def test_mark_withdrawal_failed_rejects_after_xaut_sale(monkeypatch, tmp_path) -
     assert "external XAUT movement" in response.json()["detail"]
 
 
-def test_trm_prefers_seticap_close_over_stale_cache(monkeypatch, tmp_path) -> None:
+def test_trm_prefers_fresh_fetch_over_stale_cache(monkeypatch, tmp_path) -> None:
     import chaut_api.trm as trm_module
 
     cache_path = tmp_path / "trm-cache.json"
     cache_path.write_text(
-        '{"reference_rate":3448.35,"source":"seticap-cache-stale","fetched_at_epoch":1}'
+        '{"reference_rate":3448.35,"source":"datos-gov-cache-stale","fetched_at_epoch":1}'
     )
     monkeypatch.setattr(trm_module, "CACHE_PATH", cache_path)
     monkeypatch.setattr(
@@ -1797,38 +1798,67 @@ def test_trm_prefers_seticap_close_over_stale_cache(monkeypatch, tmp_path) -> No
         "_fetch_seticap_trm",
         lambda: {
             "reference_rate": 3678.15,
-            "reference_rate_source": "seticap-close",
-            "reference_rate_date": "1/6/2026",
-            "source": "seticap",
+            "reference_rate_source": "datos-gov-trm",
+            "reference_rate_date": "2026-11-10",
+            "source": "datos-gov",
         },
     )
 
     trm = trm_module.get_seticap_trm(ttl_seconds=0)
 
     assert trm["reference_rate"] == 3678.15
-    assert trm["source"] == "seticap"
-    assert trm["reference_rate_source"] == "seticap-close"
+    assert trm["source"] == "datos-gov"
+    assert trm["reference_rate_source"] == "datos-gov-trm"
 
 
-def test_trm_uses_stale_seticap_cache_when_fetch_fails(monkeypatch, tmp_path) -> None:
+def test_trm_uses_stale_cache_when_fetch_fails(monkeypatch, tmp_path) -> None:
     import chaut_api.trm as trm_module
 
     cache_path = tmp_path / "trm-cache.json"
     cache_path.write_text(
-        '{"reference_rate":3448.35,"source":"seticap","reference_rate_source":"seticap-close","fetched_at_epoch":1}'
+        '{"reference_rate":3448.35,"source":"datos-gov","reference_rate_source":"datos-gov-trm","fetched_at_epoch":1}'
     )
     monkeypatch.setattr(trm_module, "CACHE_PATH", cache_path)
     monkeypatch.setattr(
         trm_module,
         "_fetch_seticap_trm",
-        lambda: (_ for _ in ()).throw(RuntimeError("seticap unavailable")),
+        lambda: (_ for _ in ()).throw(RuntimeError("datos.gov.co unavailable")),
     )
 
     trm = trm_module.get_seticap_trm(ttl_seconds=0)
 
     assert trm["reference_rate"] == 3448.35
-    assert trm["source"] == "seticap-cache-stale"
-    assert trm["reference_rate_source"] == "seticap-close"
+    assert trm["source"] == "datos-gov-cache-stale"
+    assert trm["reference_rate_source"] == "datos-gov-trm"
+
+
+def test_trm_selects_current_vigencia_from_datos_gov(monkeypatch) -> None:
+    import chaut_api.trm as trm_module
+
+    rows = [
+        {"valor": "3269.88", "vigenciadesde": "2099-01-01T00:00:00.000", "vigenciahasta": "2099-01-01T00:00:00.000"},
+        {"valor": "3237.83", "vigenciadesde": "2000-01-07T00:00:00.000", "vigenciahasta": "2000-01-09T00:00:00.000"},
+        {"valor": "3228.26", "vigenciadesde": "2000-01-06T00:00:00.000", "vigenciahasta": "2000-01-06T00:00:00.000"},
+    ]
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return json.dumps(rows).encode()
+
+    monkeypatch.setattr(trm_module.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+
+    trm = trm_module._fetch_seticap_trm()
+
+    assert trm["reference_rate"] == 3237.83
+    assert trm["reference_rate_source"] == "datos-gov-trm"
+    assert trm["reference_rate_date"] == "2000-01-07"
+    assert trm["source"] == "datos-gov"
 
 
 def test_withdrawal_blocks_double_spend_when_first_is_pending(monkeypatch, tmp_path) -> None:

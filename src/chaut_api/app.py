@@ -986,7 +986,7 @@ def create_app(
             )
             if updated_order is None:
                 raise HTTPException(status_code=404, detail="Order not found")
-            if spread["reference_rate_source"] is None or spread["reference_rate_source"] == "seticap-cache-stale":
+            if spread["reference_rate_source"] is None or spread["reference_rate_source"] == "datos-gov-cache-stale":
                 refresh_checkout_reference_rate_async(
                     store,
                     updated_order.external_id,
