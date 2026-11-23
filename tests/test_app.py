@@ -1785,6 +1785,60 @@ def test_mark_withdrawal_failed_rejects_after_xaut_sale(monkeypatch, tmp_path) -
     assert "external XAUT movement" in response.json()["detail"]
 
 
+def test_manual_payment_can_complete_failed_withdrawal_after_xaut_sale(monkeypatch, tmp_path) -> None:
+    import chaut_api.app as app_module
+
+    class StubHtxPrivateClient:
+        def place_market_sell(self, symbol, amount):
+            return {"status": "ok", "data": "sell-recovered"}
+
+        def order(self, order_id):
+            return {
+                "status": "ok",
+                "data": {
+                    "id": order_id,
+                    "state": "filled",
+                    "field-amount": "0.0003",
+                    "field-cash-amount": "1.4",
+                    "field-fees": "0",
+                },
+            }
+
+    class FailingPayoutClient:
+        def self_transfer_usdt(self, amount):
+            raise RuntimeError("coinsenda unavailable")
+
+    monkeypatch.setattr(app_module, "create_htx_private_client", lambda *args, **kwargs: StubHtxPrivateClient())
+    client = make_client_with_payout(tmp_path, FailingPayoutClient())
+    account = _seed_withdrawable_account(client, tmp_path, "withdraw-failed-recovery")
+    withdrawal = client.post(
+        "/withdrawals?confirm=EXECUTE_WITHDRAWAL_XAUT_SELL",
+        json={
+            "customer_id": account["customer_id"],
+            "provider": "telegram",
+            "provider_user_id": "withdraw-failed-recovery",
+            "breb_key": "@breb",
+            "portfolio_snapshot": {"xaut_net": 0.0003},
+        },
+    ).json()
+    assert withdrawal["status"] == "failed"
+
+    response = client.post(
+        f"/withdrawals/{withdrawal['withdrawal_id']}/confirm-payment",
+        json={
+            "cop_paid": 6270,
+            "cop_tx_ref": "coinsenda-withdraw-1",
+            "coinsenda_withdraw_fee_cop": 0,
+            "coinsenda_withdraw_gross_cop": 6270,
+            "admin_note": "Manual payment verified in Coinsenda",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert response.json()["cop_paid"] == 6270
+
+
 def test_trm_prefers_fresh_fetch_over_stale_cache(monkeypatch, tmp_path) -> None:
     import chaut_api.trm as trm_module
 
