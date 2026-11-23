@@ -815,7 +815,9 @@ def _wd_status_class(status: str) -> str:
 
 def _withdrawal_card(wd, token: str | None, csrf_token: str) -> str:
     confirm_form = ""
-    if wd.status in {"xaut_sold", "swap_failed", "paying_cop", "payout_failed"}:
+    if wd.status in {"xaut_sold", "swap_failed", "paying_cop", "payout_failed"} or (
+        wd.status == "failed" and (wd.htx_order_id or wd.ledger_entry_id)
+    ):
         confirm_form = (
             f'<form class="action-form" method="post" action="/admin/withdrawals/{escape(wd.withdrawal_id)}/confirm-payment{_token_qs(token)}">'
             f'<input name="csrf_token" type="hidden" value="{escape(csrf_token)}">'
