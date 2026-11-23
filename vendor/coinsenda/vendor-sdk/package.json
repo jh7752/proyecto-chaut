@@ -1,0 +1,31 @@
+{
+  "name": "@coinsenda/sdk",
+  "version": "1.2.0",
+  "description": "NodeJS SDK for Coinsenda",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "lib/client.js",
+    "lib/http-utils.js",
+    "lib/storage.js",
+    "lib/service-factory.js",
+    "lib/generated/index.js",
+    "lib/generated/*.methods.js",
+    "!lib/generated/*.admin.methods.js",
+    "!lib/generated/mcp-tools.js",
+    "config/environments.js",
+    "config/environments.local.example.js"
+  ],
+  "scripts": {
+    "fetch-specs": "node scripts/fetch-all-specs.js",
+    "sync-yaml": "node scripts/sync-api-yaml.js",
+    "generate": "node scripts/generate-client.js",
+    "inventory": "node scripts/generate-inventory.js",
+    "analyze-gaps": "node scripts/analyze-gaps.js"
+  },
+  "dependencies": {
+    "axios": "^1.13.4",
+    "js-yaml": "^4.1.0"
+  },
+  "license": "Apache-2.0"
+}
